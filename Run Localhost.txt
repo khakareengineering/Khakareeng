@@ -1,0 +1,5 @@
+cd "D:\Tool_Room_App\tool-room-app"
+
+npm run dev
+
+http://localhost:3000

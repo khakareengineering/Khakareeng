@@ -2,14 +2,46 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, useRef, useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
+import { uploadFileToBucket } from '@/lib/storage';
 
 export default function NewCustomerPage() {
   const router = useRouter();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
-  
-  const [photos, setPhotos] = useState([]);
-  const [drawings, setDrawings] = useState([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Customer State
+  const [customer, setCustomer] = useState({
+    name: '',
+    contact_no: '',
+    city: '',
+    address: '',
+  });
+
+  // Job Card State
+  const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
+  const [status, setStatus] = useState('Pending');
+  const [specs, setSpecs] = useState({
+    qty: '',
+    od: '',
+    nt: '',
+    model: '',
+    angle: '',
+    root: '',
+    thickness: '',
+    length: '',
+    bore_keyway: '',
+    material_grade: '',
+    hardness: '',
+    gear_price: '',
+    tc_amt: ''
+  });
+  const [remarks, setRemarks] = useState('');
+
+  // Files State
+  const [photoFiles, setPhotoFiles] = useState([]);
+  const [drawingFiles, setDrawingFiles] = useState([]);
 
   const profileMenuRef = useRef(null);
 
@@ -26,41 +58,90 @@ export default function NewCustomerPage() {
   const handleFileUpload = (e, type) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
-    files.forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const img = new Image();
-        img.src = event.target.result;
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          let width = img.width, height = img.height;
-          if (width > height) { if (width > 1000) { height *= 1000 / width; width = 1000; } } 
-          else { if (height > 1000) { width *= 1000 / height; height = 1000; } }
-          canvas.width = width; canvas.height = height;
-          canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-          const compressedDataUrl = canvas.toDataURL('image/webp', 0.7);
-          if (type === 'photos') setPhotos((prev) => [...prev, compressedDataUrl]);
-          else setDrawings((prev) => [...prev, compressedDataUrl]);
-        };
-      };
-      reader.readAsDataURL(file);
-    });
+    if (type === 'photos') {
+      setPhotoFiles((prev) => [...prev, ...files]);
+    } else {
+      setDrawingFiles((prev) => [...prev, ...files]);
+    }
   };
 
-  const handleSave = (e) => {
+  const handleSave = async (e) => {
     e.preventDefault();
-    alert('Job Card Saved Successfully!');
-    router.push('/dashboard'); 
+    if (!customer.name.trim()) {
+      alert('कृपया Customer Name प्रविष्ट करा!');
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+
+      // 1. Insert Customer
+      const { data: customerData, error: custError } = await supabase
+        .from('customers')
+        .insert([{
+          name: customer.name.trim(),
+          contact_no: customer.contact_no.trim(),
+          city: customer.city.trim(),
+          address: customer.address.trim(),
+          is_active: true
+        }])
+        .select()
+        .single();
+
+      if (custError) throw custError;
+
+      // 2. Upload Files to Supabase Storage Bucket
+      const photoUrls = [];
+      for (const file of photoFiles) {
+        const url = await uploadFileToBucket(file, 'photos');
+        if (url) photoUrls.push(url);
+      }
+
+      const drawingUrls = [];
+      for (const file of drawingFiles) {
+        const url = await uploadFileToBucket(file, 'drawings');
+        if (url) drawingUrls.push(url);
+      }
+
+      // 3. Insert Job Card
+      const { error: jobError } = await supabase
+        .from('job_cards')
+        .insert([{
+          customer_id: customerData.id,
+          order_date: orderDate,
+          status: status,
+          qty: specs.qty ? parseInt(specs.qty) : null,
+          od: specs.od,
+          nt: specs.nt,
+          model: specs.model,
+          angle: specs.angle,
+          root: specs.root,
+          thickness: specs.thickness,
+          length: specs.length,
+          bore_keyway: specs.bore_keyway,
+          material_grade: specs.material_grade,
+          hardness: specs.hardness,
+          gear_price: specs.gear_price ? parseFloat(specs.gear_price) : 0,
+          tc_amt: specs.tc_amt ? parseFloat(specs.tc_amt) : 0,
+          photos: photoUrls,
+          drawings: drawingUrls,
+          remarks: remarks
+        }]);
+
+      if (jobError) throw jobError;
+
+      alert('Job Card Saved Successfully to Supabase!');
+      router.push('/dashboard');
+    } catch (err) {
+      console.error('Error saving job card:', err);
+      alert('Error: ' + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
     <div className="flex h-screen bg-[#f0f4f8] font-sans text-gray-800 antialiased overflow-hidden relative">
-      
-      {/* Page Animation */}
-      <style jsx>{`
-        @keyframes pageFadeSlide { from { opacity: 0; transform: translateY(20px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-        .page-transition { animation: pageFadeSlide 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-      `}</style>
 
       <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-[#3db2a8]/20 rounded-full blur-[80px] z-0 pointer-events-none"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] bg-[#1a2b3c]/10 rounded-full blur-[100px] z-0 pointer-events-none"></div>
@@ -107,7 +188,7 @@ export default function NewCustomerPage() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 page-transition">
+        <main className="flex-1 overflow-y-auto p-4 md:p-8">
           <div className="max-w-5xl mx-auto mb-6">
             <h1 className="text-xl md:text-2xl font-extrabold text-[#1a2b3c] tracking-tight">Create New Job Card</h1>
             <p className="text-gray-500 text-[12px] md:text-[13px] mt-1 font-medium">Enter customer details and technical specifications.</p>
@@ -117,26 +198,53 @@ export default function NewCustomerPage() {
             <div className="bg-white/40 backdrop-blur-2xl p-6 md:p-8 rounded-[2rem] shadow-sm border border-white/60">
               <h2 className="text-[15px] font-extrabold text-[#1a2b3c] mb-6 pb-3 border-b border-gray-300/30">Customer Information</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
-                <div><label className="block font-bold text-gray-500 mb-2 uppercase">Customer Name *</label><input type="text" required className="w-full bg-white/50 border border-white/80 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="Enter customer name" /></div>
-                <div><label className="block font-bold text-gray-500 mb-2 uppercase">Contact No</label><input type="tel" className="w-full bg-white/50 border border-white/80 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="Enter contact number" /></div>
-                <div><label className="block font-bold text-gray-500 mb-2 uppercase">City</label><input type="text" className="w-full bg-white/50 border border-white/80 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="Enter city" /></div>
-                <div><label className="block font-bold text-gray-500 mb-2 uppercase">Order Date</label><input type="date" className="w-full bg-white/50 border border-white/80 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" /></div>
-                <div className="md:col-span-2"><label className="block font-bold text-gray-500 mb-2 uppercase">Address</label><input type="text" className="w-full bg-white/50 border border-white/80 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="Enter full address" /></div>
+                <div>
+                  <label className="block font-bold text-gray-500 mb-2 uppercase">Customer Name *</label>
+                  <input type="text" required value={customer.name} onChange={(e) => setCustomer({...customer, name: e.target.value})} className="w-full bg-white/50 border border-white/80 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="Enter customer name" />
+                </div>
+                <div>
+                  <label className="block font-bold text-gray-500 mb-2 uppercase">Contact No</label>
+                  <input type="tel" value={customer.contact_no} onChange={(e) => setCustomer({...customer, contact_no: e.target.value})} className="w-full bg-white/50 border border-white/80 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="Enter contact number" />
+                </div>
+                <div>
+                  <label className="block font-bold text-gray-500 mb-2 uppercase">City</label>
+                  <input type="text" value={customer.city} onChange={(e) => setCustomer({...customer, city: e.target.value})} className="w-full bg-white/50 border border-white/80 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="Enter city" />
+                </div>
+                <div>
+                  <label className="block font-bold text-gray-500 mb-2 uppercase">Order Date</label>
+                  <input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} className="w-full bg-white/50 border border-white/80 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block font-bold text-gray-500 mb-2 uppercase">Address</label>
+                  <input type="text" value={customer.address} onChange={(e) => setCustomer({...customer, address: e.target.value})} className="w-full bg-white/50 border border-white/80 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="Enter full address" />
+                </div>
               </div>
             </div>
 
             <div className="bg-white/40 backdrop-blur-2xl p-6 md:p-8 rounded-[2rem] shadow-sm border border-white/60">
               <div className="flex justify-between items-center mb-6 pb-3 border-b border-gray-300/30">
                 <h2 className="text-[15px] font-extrabold text-[#1a2b3c]">Gear Specifications & Status</h2>
-                <select className="bg-white/50 border border-white/80 rounded-xl px-4 py-2 text-xs font-semibold focus:outline-none"><option>Pending</option><option>In-Production</option><option>Completed</option><option>Delivered</option></select>
+                <select value={status} onChange={(e) => setStatus(e.target.value)} className="bg-white/50 border border-white/80 rounded-xl px-4 py-2 text-xs font-semibold focus:outline-none cursor-pointer">
+                  <option value="Pending">Pending</option>
+                  <option value="In-Production">In-Production</option>
+                  <option value="Completed">Completed</option>
+                  <option value="Delivered">Delivered</option>
+                </select>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 text-xs">
-                {['Qty', 'OD', 'NT', 'Model', 'Angle', 'Root', 'Thickness', 'Length', 'Bore Keyway', 'Material Grade', 'Hardness', 'Gear Price'].map((spec) => (
-                  <div key={spec}>
-                    <label className="block font-bold text-gray-500 mb-1.5 uppercase text-[10px]">{spec}</label>
-                    <input type="text" className="w-full bg-white/50 border border-white/80 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder={spec === 'Gear Price' ? '₹ Amount' : ''} />
-                  </div>
-                ))}
+                <div><label className="block font-bold text-gray-500 mb-1.5 uppercase text-[10px]">QTY</label><input type="number" value={specs.qty} onChange={(e) => setSpecs({...specs, qty: e.target.value})} className="w-full bg-white/50 border border-white/80 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="e.g. 5" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1.5 uppercase text-[10px]">OD</label><input type="text" value={specs.od} onChange={(e) => setSpecs({...specs, od: e.target.value})} className="w-full bg-white/50 border border-white/80 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="e.g. 45mm" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1.5 uppercase text-[10px]">NT</label><input type="text" value={specs.nt} onChange={(e) => setSpecs({...specs, nt: e.target.value})} className="w-full bg-white/50 border border-white/80 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="e.g. 24" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1.5 uppercase text-[10px]">MODEL</label><input type="text" value={specs.model} onChange={(e) => setSpecs({...specs, model: e.target.value})} className="w-full bg-white/50 border border-white/80 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="e.g. EN8 Gear" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1.5 uppercase text-[10px]">ANGLE</label><input type="text" value={specs.angle} onChange={(e) => setSpecs({...specs, angle: e.target.value})} className="w-full bg-white/50 border border-white/80 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="e.g. 20°" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1.5 uppercase text-[10px]">ROOT</label><input type="text" value={specs.root} onChange={(e) => setSpecs({...specs, root: e.target.value})} className="w-full bg-white/50 border border-white/80 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="e.g. 2mm" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1.5 uppercase text-[10px]">THICKNESS</label><input type="text" value={specs.thickness} onChange={(e) => setSpecs({...specs, thickness: e.target.value})} className="w-full bg-white/50 border border-white/80 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="e.g. 15mm" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1.5 uppercase text-[10px]">LENGTH</label><input type="text" value={specs.length} onChange={(e) => setSpecs({...specs, length: e.target.value})} className="w-full bg-white/50 border border-white/80 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="e.g. 100mm" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1.5 uppercase text-[10px]">BORE KEYWAY</label><input type="text" value={specs.bore_keyway} onChange={(e) => setSpecs({...specs, bore_keyway: e.target.value})} className="w-full bg-white/50 border border-white/80 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="e.g. 20mm" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1.5 uppercase text-[10px]">MATERIAL GRADE</label><input type="text" value={specs.material_grade} onChange={(e) => setSpecs({...specs, material_grade: e.target.value})} className="w-full bg-white/50 border border-white/80 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="e.g. EN8" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1.5 uppercase text-[10px]">HARDNESS</label><input type="text" value={specs.hardness} onChange={(e) => setSpecs({...specs, hardness: e.target.value})} className="w-full bg-white/50 border border-white/80 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="e.g. 30 HRC" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1.5 uppercase text-[10px]">GEAR PRICE</label><input type="number" step="any" value={specs.gear_price} onChange={(e) => setSpecs({...specs, gear_price: e.target.value})} className="w-full bg-white/50 border border-white/80 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="₹ Price" /></div>
+                <div className="col-span-2 md:col-span-2"><label className="block font-bold text-gray-500 mb-1.5 uppercase text-[10px]">TC AMT (TEETH CUTTING)</label><input type="number" step="any" value={specs.tc_amt} onChange={(e) => setSpecs({...specs, tc_amt: e.target.value})} className="w-full bg-white/50 border border-white/80 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="₹ TC Amount" /></div>
               </div>
             </div>
 
@@ -145,23 +253,25 @@ export default function NewCustomerPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6 text-xs">
                 <label className="border-2 border-dashed border-gray-300/50 rounded-2xl p-6 flex flex-col items-center justify-center bg-white/20 hover:bg-white/40 cursor-pointer text-center transition-colors">
                   <span className="font-bold text-[#1a2b3c]">Upload Photos (Multiple)</span>
-                  <p className="text-[11px] text-gray-500 mt-1">{photos.length} photos selected</p>
+                  <p className="text-[11px] text-gray-500 mt-1">{photoFiles.length} photos selected</p>
                   <input type="file" accept="image/*" multiple onChange={(e) => handleFileUpload(e, 'photos')} className="hidden" />
                 </label>
                 <label className="border-2 border-dashed border-gray-300/50 rounded-2xl p-6 flex flex-col items-center justify-center bg-white/20 hover:bg-white/40 cursor-pointer text-center transition-colors">
                   <span className="font-bold text-[#1a2b3c]">Upload Drawings (Multiple)</span>
-                  <p className="text-[11px] text-gray-500 mt-1">{drawings.length} drawings selected</p>
+                  <p className="text-[11px] text-gray-500 mt-1">{drawingFiles.length} drawings selected</p>
                   <input type="file" accept="image/*,.pdf" multiple onChange={(e) => handleFileUpload(e, 'drawings')} className="hidden" />
                 </label>
               </div>
               <div>
                 <label className="block font-bold text-gray-500 mb-2 uppercase text-xs">Remarks / Instructions</label>
-                <textarea rows="3" className="w-full bg-white/50 border border-white/80 rounded-xl px-4 py-3 text-xs resize-none focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="Add any special instructions..."></textarea>
+                <textarea rows="3" value={remarks} onChange={(e) => setRemarks(e.target.value)} className="w-full bg-white/50 border border-white/80 rounded-xl px-4 py-3 text-xs resize-none focus:outline-none focus:ring-2 focus:ring-[#3db2a8]" placeholder="Add any special instructions..."></textarea>
               </div>
             </div>
 
             <div className="pt-2 flex justify-end">
-              <button type="submit" className="bg-[#3db2a8] hover:bg-[#359d94] text-white font-bold py-3 px-8 rounded-2xl shadow-lg text-xs cursor-pointer transition-all">Create Job Card</button>
+              <button type="submit" disabled={isSubmitting} className="bg-[#3db2a8] hover:bg-[#359d94] disabled:opacity-50 text-white font-bold py-3 px-8 rounded-2xl shadow-lg text-xs cursor-pointer transition-all">
+                {isSubmitting ? 'Saving to Database...' : 'Create Job Card'}
+              </button>
             </div>
           </form>
         </main>

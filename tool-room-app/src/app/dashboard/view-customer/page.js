@@ -1,17 +1,29 @@
 'use client';
 import Link from 'next/link';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { supabase } from '@/lib/supabase';
 
 export default function ViewCustomerPage() {
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
-  
-  const [searchQuery, setSearchQuery] = useState('');
-  const [viewCustomer, setViewCustomer] = useState(null); 
-  const [editCustomer, setEditCustomer] = useState(null); 
-  const [expandedOrderId, setExpandedOrderId] = useState(null); 
+  const [customers, setCustomers] = useState([]);
+  const [jobCards, setJobCards] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
 
+  // Modals state
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [isEditCustomerOpen, setIsEditCustomerOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [isEditJobOpen, setIsEditJobOpen] = useState(false);
+
+  // Profile menu state
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const profileMenuRef = useRef(null);
+
+  useEffect(() => {
+    fetchData();
+  }, []);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -23,74 +35,150 @@ export default function ViewCustomerPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const generateRandomHistory = (count) => {
-    const models = ['EN8 Gear', 'SS304 Pinion', 'Helical Gear', 'Bevel Gear', 'Spur Gear', 'MS Bracket'];
-    const statuses = [
-      { label: 'Completed', color: 'text-green-600 bg-green-50' },
-      { label: 'Delivered', color: 'text-purple-600 bg-purple-50' },
-      { label: 'In-Production', color: 'text-blue-600 bg-blue-50' },
-      { label: 'Pending', color: 'text-orange-600 bg-orange-50' }
-    ];
-    let historyList = [];
-    for (let i = 1; i <= count; i++) {
-      const randModel = models[i % models.length];
-      const randStatus = statuses[i % statuses.length];
-      const randomPrice = (i * 2500 + 12000); 
-      const randomDay = (i * 3) % 28 + 1;
-      const randomMonth = (i % 8) + 1;
-      historyList.push({
-        orderId: `#${2000 + i}`,
-        date: `2026-0${randomMonth > 9 ? '9' : randomMonth}-${randomDay > 9 ? randomDay : '0' + randomDay}`,
-        model: randModel,
-        status: randStatus.label,
-        color: randStatus.color,
-        qty: `${(i % 9) + 1}`,
-        od: `${40 + (i * 2)}mm`,
-        nt: `${20 + i}`,
-        angle: `${15 + (i % 10)}°`,
-        root: `${1 + (i % 3)}mm`,
-        thickness: `${12 + (i % 10)}mm`,
-        length: `${100 + (i * 4)}mm`,
-        boreKeyway: `${18 + (i % 8)}mm`,
-        materialGrade: i % 2 === 0 ? 'EN8' : 'SS304',
-        hardness: `${35 + (i % 15)} HRC`,
-        price: `₹${randomPrice.toLocaleString()}`
-      });
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      // Fetch only active customers
+      const { data: custData, error: custErr } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('is_active', true)
+        .order('id', { ascending: false });
+
+      if (custErr) throw custErr;
+
+      // Fetch all job cards
+      const { data: jobsData, error: jobsErr } = await supabase
+        .from('job_cards')
+        .select('*')
+        .order('id', { ascending: false });
+
+      if (jobsErr) throw jobsErr;
+
+      setCustomers(custData || []);
+      setJobCards(jobsData || []);
+    } catch (err) {
+      console.error('Error fetching data:', err.message);
+    } finally {
+      setLoading(false);
     }
-    return historyList.sort((a, b) => new Date(b.date) - new Date(a.date));
   };
 
-  const [customers, setCustomers] = useState([
-    { id: '#1045', name: 'Rahul Industries', contact: '9876543210', city: 'Pune', date: '2026-08-30', address: 'MIDC, Pune', status: 'In-Production', color: 'text-blue-600 bg-blue-50', qty: '9', od: '141mm', nt: '52', model: 'SS304 Pinion', angle: '22°', root: '2mm', thickness: '17mm', length: '265mm', boreKeyway: '22mm', materialGrade: 'SS304', hardness: '47 HRC', price: '₹47,900', remarks: 'Precision required', history: generateRandomHistory(6) },
-    { id: '#1044', name: 'Apex Engineering', contact: '9123456789', city: 'Mumbai', date: '2026-08-28', address: 'Andheri, Mumbai', status: 'Completed', color: 'text-green-600 bg-green-50', qty: '8', od: '60mm', nt: '30', model: 'SS304 Pinion', angle: '15°', root: '1.5mm', thickness: '20mm', length: '120mm', boreKeyway: '25mm', materialGrade: 'SS304', hardness: '35 HRC', price: '₹18,000', remarks: 'SS finishing', history: generateRandomHistory(4) }
-  ]);
-
-  const filteredCustomers = customers.filter(c => 
-    c.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    c.model.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    c.city.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    c.contact.includes(searchQuery)
-  );
-
-  const handleFullEditSave = (e) => {
+  // 1. Customer Update
+  const handleUpdateCustomer = async (e) => {
     e.preventDefault();
-    setCustomers(customers.map(c => c.id === editCustomer.id ? editCustomer : c));
-    setEditCustomer(null);
-    alert('Job Card updated successfully!');
+    try {
+      const { error } = await supabase
+        .from('customers')
+        .update({
+          name: selectedCustomer.name,
+          contact_no: selectedCustomer.contact_no,
+          city: selectedCustomer.city,
+          address: selectedCustomer.address,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', selectedCustomer.id);
+
+      if (error) throw error;
+      alert('Customer Updated Successfully!');
+      setIsEditCustomerOpen(false);
+      fetchData();
+    } catch (err) {
+      alert('Error updating customer: ' + err.message);
+    }
+  };
+
+  // 2. Soft Delete Customer
+  const handleDeleteCustomer = async (customerId) => {
+    if (!confirm('Are you sure you want to remove this customer? Order history will be preserved.')) return;
+    try {
+      const { error } = await supabase
+        .from('customers')
+        .update({ is_active: false })
+        .eq('id', customerId);
+
+      if (error) throw error;
+      alert('Customer removed from active list.');
+      setIsEditCustomerOpen(false);
+      fetchData();
+    } catch (err) {
+      alert('Error deleting customer: ' + err.message);
+    }
+  };
+
+  // 3. Job Card Update
+  const handleUpdateJob = async (e) => {
+    e.preventDefault();
+    try {
+      const { error } = await supabase
+        .from('job_cards')
+        .update({
+          status: selectedJob.status,
+          qty: selectedJob.qty ? parseInt(selectedJob.qty) : null,
+          od: selectedJob.od,
+          nt: selectedJob.nt,
+          model: selectedJob.model,
+          angle: selectedJob.angle,
+          root: selectedJob.root,
+          thickness: selectedJob.thickness,
+          length: selectedJob.length,
+          bore_keyway: selectedJob.bore_keyway,
+          material_grade: selectedJob.material_grade,
+          hardness: selectedJob.hardness,
+          gear_price: selectedJob.gear_price ? parseFloat(selectedJob.gear_price) : 0,
+          tc_amt: selectedJob.tc_amt ? parseFloat(selectedJob.tc_amt) : 0,
+          remarks: selectedJob.remarks,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', selectedJob.id);
+
+      if (error) throw error;
+      alert('Job Card Updated Successfully!');
+      setIsEditJobOpen(false);
+      fetchData();
+    } catch (err) {
+      alert('Error updating job card: ' + err.message);
+    }
+  };
+
+  // Mapping customers with their latest job details
+  const filteredData = customers.map((c) => {
+    const custJobs = jobCards.filter((j) => j.customer_id === c.id);
+    const latestJob = custJobs[0] || {};
+    return {
+      ...c,
+      jobsCount: custJobs.length,
+      latestJob,
+      allJobs: custJobs
+    };
+  }).filter((item) => {
+    const q = searchTerm.toLowerCase();
+    return (
+      item.name?.toLowerCase().includes(q) ||
+      item.city?.toLowerCase().includes(q) ||
+      item.contact_no?.toLowerCase().includes(q) ||
+      item.latestJob?.model?.toLowerCase().includes(q) ||
+      item.id?.toString().includes(q)
+    );
+  });
+
+  const getStatusBadge = (status) => {
+    switch (status) {
+      case 'In-Production': return 'bg-blue-50 text-blue-600 border border-blue-200';
+      case 'Completed': return 'bg-emerald-50 text-emerald-600 border border-emerald-200';
+      case 'Delivered': return 'bg-purple-50 text-purple-600 border border-purple-200';
+      default: return 'bg-amber-50 text-amber-600 border border-amber-200';
+    }
   };
 
   return (
     <div className="flex h-screen bg-[#f0f4f8] font-sans text-gray-800 antialiased overflow-hidden relative">
-      <style jsx>{`
-        @keyframes pageFadeSlide { from { opacity: 0; transform: translateY(20px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-        .page-transition { animation: pageFadeSlide 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-      `}</style>
       <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-[#3db2a8]/20 rounded-full blur-[80px] z-0 pointer-events-none"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] bg-[#1a2b3c]/10 rounded-full blur-[100px] z-0 pointer-events-none"></div>
 
       {isMobileMenuOpen && <div className="fixed inset-0 bg-[#1a2b3c]/20 backdrop-blur-sm z-40 md:hidden" onClick={() => setIsMobileMenuOpen(false)}></div>}
 
+      {/* Sidebar */}
       <aside className={`fixed inset-y-0 left-0 w-[260px] bg-white/40 backdrop-blur-2xl border-r border-white/60 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-50 transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 flex flex-col ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="h-20 flex items-center justify-between px-8">
           <span className="text-xl font-black text-[#1a2b3c] tracking-wider">RA-XIS<span className="text-[#3db2a8]">.</span></span>
@@ -106,6 +194,7 @@ export default function ViewCustomerPage() {
         <div className="p-5"><Link href="/" className="flex items-center gap-3 px-4 py-3 text-gray-400 hover:text-red-500 hover:bg-white/40 rounded-2xl font-semibold transition-colors whitespace-nowrap">Logout</Link></div>
       </aside>
 
+      {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden w-full z-10 relative">
         <header className="h-20 bg-white/30 backdrop-blur-xl border-b border-white/50 flex items-center justify-between px-4 md:px-8 relative z-50">
           <div className="flex items-center">
@@ -129,117 +218,238 @@ export default function ViewCustomerPage() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 page-transition">
-          <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
-            <div>
-              <h1 className="text-xl md:text-2xl font-extrabold text-[#1a2b3c] tracking-tight">Customer Database</h1>
-              <p className="text-gray-500 text-[12px] md:text-[13px] mt-1 font-medium">Search, view sorted gear history, and update complete job cards.</p>
+        <main className="flex-1 overflow-y-auto p-4 md:p-8">
+          <div className="max-w-7xl mx-auto space-y-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h1 className="text-xl md:text-2xl font-extrabold text-[#1a2b3c] tracking-tight">Customer Database</h1>
+                <p className="text-gray-500 text-[12px] md:text-[13px] mt-1 font-medium">Search, view sorted gear history, and update complete customer & job details.</p>
+              </div>
+              <div className="w-full md:w-80">
+                <input
+                  type="text"
+                  placeholder="Search ID, Name, Model, City..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full bg-white/60 border border-white/80 rounded-2xl px-4 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#3db2a8] shadow-sm"
+                />
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search ID, Name, Model, City..." className="bg-white/60 border border-white/80 rounded-xl px-4 py-2.5 text-[12px] w-full md:w-72 focus:outline-none focus:ring-2 focus:ring-[#3db2a8] shadow-sm" />
-            </div>
-          </div>
 
-          <div className="bg-white/40 backdrop-blur-2xl rounded-[2rem] shadow-[0_8px_32px_0_rgba(31,41,55,0.05)] border border-white/60 overflow-hidden p-6">
-            <div className="overflow-x-auto">
-               <table className="w-full text-left text-sm min-w-[950px]">
-                 <thead className="text-gray-400 border-b border-gray-300/30">
-                   <tr>
-                     <th className="py-3 px-3 font-bold text-xs uppercase tracking-wider">Customer ID ↕</th>
-                     <th className="py-3 px-3 font-bold text-xs uppercase tracking-wider">Customer Name ↕</th>
-                     <th className="py-3 px-3 font-bold text-xs uppercase tracking-wider">Model / Material</th>
-                     <th className="py-3 px-3 font-bold text-xs uppercase tracking-wider">Gear Price</th>
-                     <th className="py-3 px-3 font-bold text-xs uppercase tracking-wider">Contact</th>
-                     <th className="py-3 px-3 font-bold text-xs uppercase tracking-wider">City</th>
-                     <th className="py-3 px-3 font-bold text-xs uppercase tracking-wider">Date</th>
-                     <th className="py-3 px-3 font-bold text-xs uppercase tracking-wider">Status</th>
-                     <th className="py-3 px-3 font-bold text-xs uppercase tracking-wider text-center">Actions</th>
-                   </tr>
-                 </thead>
-                 <tbody className="text-gray-600 divide-y divide-gray-300/20">
-                   {filteredCustomers.length > 0 ? filteredCustomers.map((cust) => (
-                     <tr key={cust.id} className="hover:bg-white/40 transition-colors">
-                       <td onClick={() => { setViewCustomer(cust); setExpandedOrderId(null); }} className="py-4 px-3 font-extrabold text-[#3db2a8] cursor-pointer hover:underline">{cust.id}</td>
-                       <td onClick={() => { setViewCustomer(cust); setExpandedOrderId(null); }} className="py-4 px-3 font-bold text-[#1a2b3c] cursor-pointer hover:underline">{cust.name}</td>
-                       <td className="py-4 px-3 font-medium">{cust.model}</td>
-                       <td className="py-4 px-3 font-extrabold text-[#1a2b3c]">{cust.price}</td>
-                       <td className="py-4 px-3 font-medium">{cust.contact}</td>
-                       <td className="py-4 px-3 font-medium">{cust.city}</td>
-                       <td className="py-4 px-3 font-medium">{cust.date}</td>
-                       <td className="py-4 px-3"><span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[10px] md:text-[11px] font-bold tracking-wide ${cust.color}`}>{cust.status}</span></td>
-                       <td className="py-4 px-3 text-center"><button onClick={() => setEditCustomer(cust)} className="bg-white/60 hover:bg-white text-[#1a2b3c] border border-gray-200 px-3 py-1.5 rounded-xl font-bold text-xs shadow-sm transition-all">Edit</button></td>
-                     </tr>
-                   )) : <tr><td colSpan="9" className="py-8 text-center text-gray-400 font-semibold">No matching records.</td></tr>}
-                 </tbody>
-               </table>
+            {/* Table Card */}
+            <div className="bg-white/40 backdrop-blur-2xl rounded-[2rem] border border-white/60 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-white/30 border-b border-white/50 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                    <tr>
+                      <th className="py-4 px-6">Customer ID</th>
+                      <th className="py-4 px-6">Customer Name</th>
+                      <th className="py-4 px-6">Model / Material</th>
+                      <th className="py-4 px-6">Gear Price</th>
+                      <th className="py-4 px-6">TC Amt</th>
+                      <th className="py-4 px-6">Contact</th>
+                      <th className="py-4 px-6">City</th>
+                      <th className="py-4 px-6">Status</th>
+                      <th className="py-4 px-6 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/40">
+                    {loading ? (
+                      <tr><td colSpan="9" className="text-center py-8 text-gray-500 font-medium">Loading database...</td></tr>
+                    ) : filteredData.length === 0 ? (
+                      <tr><td colSpan="9" className="text-center py-8 text-gray-500 font-medium">No records found.</td></tr>
+                    ) : (
+                      filteredData.map((cust) => (
+                        <tr key={cust.id} className="hover:bg-white/30 transition-colors">
+                          <td className="py-4 px-6 font-bold text-[#3db2a8]">#{cust.id}</td>
+                          <td className="py-4 px-6 font-bold text-[#1a2b3c] cursor-pointer hover:underline" onClick={() => { setSelectedCustomer(cust); setIsHistoryOpen(true); }}>
+                            {cust.name}
+                            <span className="block text-[10px] text-gray-400 font-normal">Orders: {cust.jobsCount} (Click to View History)</span>
+                          </td>
+                          <td className="py-4 px-6 font-semibold text-gray-700">{cust.latestJob?.model || '—'}</td>
+                          <td className="py-4 px-6 font-bold text-gray-800">{cust.latestJob?.gear_price ? `₹${Number(cust.latestJob.gear_price).toLocaleString('en-IN')}` : '—'}</td>
+                          <td className="py-4 px-6 font-bold text-emerald-700">{cust.latestJob?.tc_amt ? `₹${Number(cust.latestJob.tc_amt).toLocaleString('en-IN')}` : '—'}</td>
+                          <td className="py-4 px-6 text-gray-600">{cust.contact_no || '—'}</td>
+                          <td className="py-4 px-6 text-gray-600">{cust.city || '—'}</td>
+                          <td className="py-4 px-6">
+                            {cust.latestJob?.status ? (
+                              <span className={`px-3 py-1 rounded-full text-[10px] font-bold ${getStatusBadge(cust.latestJob.status)}`}>
+                                {cust.latestJob.status}
+                              </span>
+                            ) : '—'}
+                          </td>
+                          <td className="py-4 px-6 text-right space-x-2">
+                            <button
+                              onClick={() => { setSelectedCustomer(cust); setIsEditCustomerOpen(true); }}
+                              className="px-3 py-1.5 bg-white/70 hover:bg-white text-gray-700 font-bold rounded-xl border border-white/80 shadow-sm transition-all"
+                            >
+                              Edit Info
+                            </button>
+                            {cust.latestJob?.id && (
+                              <button
+                                onClick={() => { setSelectedJob(cust.latestJob); setIsEditJobOpen(true); }}
+                                className="px-3 py-1.5 bg-[#3db2a8]/20 hover:bg-[#3db2a8]/30 text-[#1a2b3c] font-bold rounded-xl border border-[#3db2a8]/40 shadow-sm transition-all"
+                              >
+                                Edit Order
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </main>
       </div>
 
-      {viewCustomer && (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white/95 backdrop-blur-2xl rounded-[2.5rem] p-6 md:p-8 max-w-3xl w-full max-h-[85vh] overflow-y-auto shadow-2xl border border-white animate-in fade-in zoom-in-95">
-            <div className="flex justify-between items-center mb-6 border-b border-gray-200 pb-4 sticky top-0 bg-white/90 backdrop-blur-md z-10 pt-2 px-2">
+      {/* 1. Modal: Edit Customer & Soft Delete */}
+      {isEditCustomerOpen && selectedCustomer && (
+        <div className="fixed inset-0 bg-[#1a2b3c]/30 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white/95 backdrop-blur-2xl rounded-[2rem] border border-white/80 shadow-2xl w-full max-w-lg p-6 md:p-8 relative">
+            <div className="flex justify-between items-center mb-6 pb-3 border-b border-gray-100">
+              <h3 className="text-lg font-extrabold text-[#1a2b3c]">Edit Customer #{selectedCustomer.id}</h3>
+              <button onClick={() => setIsEditCustomerOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold text-xl">✕</button>
+            </div>
+            <form onSubmit={handleUpdateCustomer} className="space-y-4 text-xs">
               <div>
-                <h3 className="text-xl font-black text-[#1a2b3c]">{viewCustomer.name}</h3>
-                <p className="text-xs text-gray-500 font-medium">Customer ID: {viewCustomer.id} | City: {viewCustomer.city} | Orders: {viewCustomer.history.length}</p>
+                <label className="block font-bold text-gray-500 mb-1 uppercase">Customer Name *</label>
+                <input type="text" required value={selectedCustomer.name} onChange={(e) => setSelectedCustomer({ ...selectedCustomer, name: e.target.value })} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-[#3db2a8] focus:outline-none" />
               </div>
-              <button onClick={() => setViewCustomer(null)} className="w-9 h-9 bg-gray-100 hover:bg-red-100 text-gray-600 hover:text-red-500 rounded-full font-bold">✕</button>
-            </div>
-            <h4 className="text-sm font-bold text-[#3db2a8] uppercase tracking-wider mb-3 px-2">Complete Order History</h4>
-            <div className="space-y-3 px-2 max-h-[50vh] overflow-y-auto pr-2">
-              {viewCustomer.history.map((order, idx) => {
-                const isExpanded = expandedOrderId === order.orderId;
-                return (
-                  <div key={idx} className="bg-white/70 border border-gray-200 rounded-2xl overflow-hidden shadow-xs transition-all">
-                    <div onClick={() => setExpandedOrderId(isExpanded ? null : order.orderId)} className="p-4 flex items-center justify-between cursor-pointer hover:bg-white">
-                      <div className="flex items-center gap-4">
-                        <span className="text-xs font-black text-gray-400">{order.orderId}</span>
-                        <div><span className="text-xs font-bold text-gray-400">{order.date}</span><p className="text-sm font-extrabold text-[#1a2b3c]">{order.model} <span className="text-xs text-gray-500">({order.qty} Pcs)</span></p></div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <div className="text-right"><span className="text-sm font-black text-[#3db2a8] block">{order.price}</span></div>
-                        <span className={`text-xs font-bold px-2.5 py-1 rounded-md ${order.color}`}>{order.status}</span>
-                      </div>
-                    </div>
-                    {isExpanded && (
-                      <div className="bg-[#f8fafc] border-t border-gray-200 p-4">
-                        <h5 className="text-[11px] font-extrabold text-[#1a2b3c] uppercase mb-3">Specifications</h5>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                          {['QTY', 'OD', 'NT', 'ANGLE'].map(s => <div key={s} className="bg-white p-2.5 rounded-xl border border-gray-100"><span className="text-gray-400 block text-[10px] font-bold">{s}</span><span className="font-extrabold">{order[s.toLowerCase()] || order.qty}</span></div>)}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            <div className="mt-6 flex justify-end px-2"><button onClick={() => setViewCustomer(null)} className="bg-[#1a2b3c] text-white text-xs font-bold px-6 py-2.5 rounded-xl shadow-md hover:bg-[#2c4055]">Close History</button></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-bold text-gray-500 mb-1 uppercase">Contact No</label>
+                  <input type="text" value={selectedCustomer.contact_no || ''} onChange={(e) => setSelectedCustomer({ ...selectedCustomer, contact_no: e.target.value })} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-[#3db2a8] focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block font-bold text-gray-500 mb-1 uppercase">City</label>
+                  <input type="text" value={selectedCustomer.city || ''} onChange={(e) => setSelectedCustomer({ ...selectedCustomer, city: e.target.value })} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-[#3db2a8] focus:outline-none" />
+                </div>
+              </div>
+              <div>
+                <label className="block font-bold text-gray-500 mb-1 uppercase">Address</label>
+                <textarea rows="2" value={selectedCustomer.address || ''} onChange={(e) => setSelectedCustomer({ ...selectedCustomer, address: e.target.value })} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-[#3db2a8] focus:outline-none resize-none"></textarea>
+              </div>
+              <div className="pt-4 flex justify-between items-center">
+                <button type="button" onClick={() => handleDeleteCustomer(selectedCustomer.id)} className="text-red-500 hover:text-red-700 font-bold px-3 py-2 rounded-xl hover:bg-red-50 transition-colors">
+                  Delete Customer
+                </button>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setIsEditCustomerOpen(false)} className="px-5 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold rounded-xl transition-all">Cancel</button>
+                  <button type="submit" className="px-6 py-2.5 bg-[#3db2a8] hover:bg-[#359d94] text-white font-bold rounded-xl shadow-md transition-all">Save Changes</button>
+                </div>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {editCustomer && (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white/95 backdrop-blur-2xl rounded-[2.5rem] p-6 md:p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-white animate-in fade-in zoom-in-95">
-            <div className="flex justify-between items-center mb-6 border-b border-gray-200 pb-4 sticky top-0 bg-white/90 backdrop-blur-md z-10 pt-2 px-2">
-              <h3 className="text-xl font-black text-[#1a2b3c]">Edit Job Card: {editCustomer.id}</h3>
-              <button onClick={() => setEditCustomer(null)} className="w-9 h-9 bg-gray-100 text-gray-600 hover:text-red-500 rounded-full font-bold">✕</button>
+      {/* 2. Modal: Full Job Card / Order Edit */}
+      {isEditJobOpen && selectedJob && (
+        <div className="fixed inset-0 bg-[#1a2b3c]/30 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white/95 backdrop-blur-2xl rounded-[2rem] border border-white/80 shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6 md:p-8 relative">
+            <div className="flex justify-between items-center mb-6 pb-3 border-b border-gray-100">
+              <h3 className="text-lg font-extrabold text-[#1a2b3c]">Edit Order / Job Card #{selectedJob.id}</h3>
+              <button onClick={() => setIsEditJobOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold text-xl">✕</button>
             </div>
-            <form onSubmit={handleFullEditSave} className="space-y-6 px-2">
-              <div className="bg-white/60 border border-gray-200 rounded-2xl p-5">
-                <h4 className="text-sm font-extrabold text-[#1a2b3c] mb-4 pb-2 border-b border-gray-200">Customer Info</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div><label className="block text-[11px] font-bold text-gray-500 mb-1">Name</label><input type="text" value={editCustomer.name} onChange={(e) => setEditCustomer({...editCustomer, name: e.target.value})} className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs" required /></div>
-                  <div><label className="block text-[11px] font-bold text-gray-500 mb-1">City</label><input type="text" value={editCustomer.city} onChange={(e) => setEditCustomer({...editCustomer, city: e.target.value})} className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs" required /></div>
-                </div>
+            <form onSubmit={handleUpdateJob} className="space-y-6 text-xs">
+              <div className="flex items-center justify-between bg-gray-50 p-4 rounded-2xl">
+                <span className="font-bold text-gray-700">Order Status:</span>
+                <select value={selectedJob.status} onChange={(e) => setSelectedJob({ ...selectedJob, status: e.target.value })} className="bg-white border border-gray-300 rounded-xl px-4 py-2 font-bold focus:outline-none">
+                  <option value="Pending">Pending</option>
+                  <option value="In-Production">In-Production</option>
+                  <option value="Completed">Completed</option>
+                  <option value="Delivered">Delivered</option>
+                </select>
               </div>
-              <div className="pt-2 flex justify-end gap-3 pb-4">
-                <button type="button" onClick={() => setEditCustomer(null)} className="bg-gray-100 text-gray-700 text-xs font-bold px-6 py-2.5 rounded-xl">Cancel</button>
-                <button type="submit" className="bg-[#3db2a8] text-white text-xs font-bold px-7 py-2.5 rounded-xl shadow-md">Save Changes</button>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div><label className="block font-bold text-gray-500 mb-1">QTY</label><input type="number" value={selectedJob.qty || ''} onChange={(e) => setSelectedJob({ ...selectedJob, qty: e.target.value })} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1">OD</label><input type="text" value={selectedJob.od || ''} onChange={(e) => setSelectedJob({ ...selectedJob, od: e.target.value })} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1">NT</label><input type="text" value={selectedJob.nt || ''} onChange={(e) => setSelectedJob({ ...selectedJob, nt: e.target.value })} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1">MODEL</label><input type="text" value={selectedJob.model || ''} onChange={(e) => setSelectedJob({ ...selectedJob, model: e.target.value })} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1">ANGLE</label><input type="text" value={selectedJob.angle || ''} onChange={(e) => setSelectedJob({ ...selectedJob, angle: e.target.value })} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1">ROOT</label><input type="text" value={selectedJob.root || ''} onChange={(e) => setSelectedJob({ ...selectedJob, root: e.target.value })} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1">THICKNESS</label><input type="text" value={selectedJob.thickness || ''} onChange={(e) => setSelectedJob({ ...selectedJob, thickness: e.target.value })} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1">LENGTH</label><input type="text" value={selectedJob.length || ''} onChange={(e) => setSelectedJob({ ...selectedJob, length: e.target.value })} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1">BORE KEYWAY</label><input type="text" value={selectedJob.bore_keyway || ''} onChange={(e) => setSelectedJob({ ...selectedJob, bore_keyway: e.target.value })} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1">MATERIAL GRADE</label><input type="text" value={selectedJob.material_grade || ''} onChange={(e) => setSelectedJob({ ...selectedJob, material_grade: e.target.value })} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1">HARDNESS</label><input type="text" value={selectedJob.hardness || ''} onChange={(e) => setSelectedJob({ ...selectedJob, hardness: e.target.value })} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2" /></div>
+                <div><label className="block font-bold text-gray-500 mb-1">GEAR PRICE (₹)</label><input type="number" step="any" value={selectedJob.gear_price || ''} onChange={(e) => setSelectedJob({ ...selectedJob, gear_price: e.target.value })} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2" /></div>
+                <div className="col-span-2 md:col-span-4"><label className="block font-bold text-emerald-700 mb-1 uppercase">TC AMT (TEETH CUTTING ₹)</label><input type="number" step="any" value={selectedJob.tc_amt || ''} onChange={(e) => setSelectedJob({ ...selectedJob, tc_amt: e.target.value })} className="w-full bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 font-bold text-emerald-800" /></div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-gray-500 mb-1 uppercase">Remarks</label>
+                <textarea rows="2" value={selectedJob.remarks || ''} onChange={(e) => setSelectedJob({ ...selectedJob, remarks: e.target.value })} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none resize-none"></textarea>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4">
+                <button type="button" onClick={() => setIsEditJobOpen(false)} className="px-5 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold rounded-xl transition-all">Cancel</button>
+                <button type="submit" className="px-6 py-2.5 bg-[#3db2a8] hover:bg-[#359d94] text-white font-bold rounded-xl shadow-md transition-all">Update Job Card</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Modal: Complete Order History */}
+      {isHistoryOpen && selectedCustomer && (
+        <div className="fixed inset-0 bg-[#1a2b3c]/30 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white/95 backdrop-blur-2xl rounded-[2rem] border border-white/80 shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col p-6 md:p-8 relative">
+            <div className="flex justify-between items-start mb-4 pb-3 border-b border-gray-100">
+              <div>
+                <h3 className="text-lg font-black text-[#1a2b3c]">{selectedCustomer.name}</h3>
+                <p className="text-[11px] text-gray-500 font-medium">Customer ID: #{selectedCustomer.id} | City: {selectedCustomer.city || 'N/A'} | Total Orders: {selectedCustomer.jobsCount}</p>
+              </div>
+              <button onClick={() => setIsHistoryOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold text-xl">✕</button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+              <span className="text-[11px] font-black uppercase text-[#3db2a8] tracking-wider block mb-2">Complete Order History</span>
+              {selectedCustomer.allJobs.length === 0 ? (
+                <p className="text-center py-6 text-gray-400 text-xs">No order history available for this customer.</p>
+              ) : (
+                selectedCustomer.allJobs.map((job) => (
+                  <div key={job.id} className="bg-gray-50/80 rounded-2xl p-4 border border-gray-100 space-y-3">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <span className="font-bold text-[#3db2a8] text-xs">#{job.id}</span>
+                        <span className="text-gray-400 text-[10px] ml-2">{job.order_date}</span>
+                        <span className="font-bold text-[#1a2b3c] text-xs ml-2">{job.model} ({job.qty || 0} Pcs)</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-extrabold text-[#1a2b3c] text-xs">₹{Number(job.gear_price || 0).toLocaleString('en-IN')}</span>
+                        <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold ${getStatusBadge(job.status)}`}>{job.status}</span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 bg-white p-2.5 rounded-xl text-[10px] border border-gray-100 text-gray-600">
+                      <div><span className="font-bold text-gray-400">QTY:</span> {job.qty || '—'}</div>
+                      <div><span className="font-bold text-gray-400">OD:</span> {job.od || '—'}</div>
+                      <div><span className="font-bold text-gray-400">NT:</span> {job.nt || '—'}</div>
+                      <div><span className="font-bold text-gray-400">ANGLE:</span> {job.angle || '—'}</div>
+                      <div><span className="font-bold text-gray-400">ROOT:</span> {job.root || '—'}</div>
+                      <div><span className="font-bold text-gray-400">TC AMT:</span> ₹{job.tc_amt || 0}</div>
+                      <div className="col-span-2"><span className="font-bold text-gray-400">MATERIAL:</span> {job.material_grade || '—'}</div>
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        onClick={() => { setSelectedJob(job); setIsEditJobOpen(true); }}
+                        className="text-[11px] text-[#3db2a8] hover:underline font-bold"
+                      >
+                        Edit This Order Specs →
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-gray-100 flex justify-end">
+              <button onClick={() => setIsHistoryOpen(false)} className="px-6 py-2 bg-[#1a2b3c] text-white font-bold text-xs rounded-xl shadow-sm">Close History</button>
+            </div>
           </div>
         </div>
       )}
