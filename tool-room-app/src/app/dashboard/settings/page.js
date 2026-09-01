@@ -6,6 +6,18 @@ import Cropper from 'react-easy-crop';
 import { supabase } from '@/lib/supabase';
 import { uploadFileToBucket } from '@/lib/storage';
 import getCroppedImg from '@/lib/cropImage';
+import LiquidProgressBar from '@/components/LiquidProgressBar';
+import { 
+  LayoutDashboard, 
+  PlusCircle, 
+  ClipboardList, 
+  UserPlus, 
+  Users, 
+  BarChart3, 
+  Settings, 
+  LogOut,
+  Database
+} from 'lucide-react';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -17,6 +29,12 @@ export default function SettingsPage() {
   const [avatarUrl, setAvatarUrl] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+
+  // Storage Quota State
+  const [dbUsageMB, setDbUsageMB] = useState(0.05);
+  const [dbUsagePercent, setDbUsagePercent] = useState(1);
+  const [mediaUsageMB, setMediaUsageMB] = useState(0);
+  const [mediaUsagePercent, setMediaUsagePercent] = useState(0);
 
   // Crop State
   const [imageSrc, setImageSrc] = useState(null);
@@ -32,7 +50,7 @@ export default function SettingsPage() {
   const fileInputRef = useRef(null);
 
   useEffect(() => {
-    fetchSettings();
+    fetchSettingsAndStorage();
   }, []);
 
   useEffect(() => {
@@ -45,21 +63,60 @@ export default function SettingsPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const fetchSettings = async () => {
+  const fetchSettingsAndStorage = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+
+      // 1. Fetch Owner Settings
+      const { data } = await supabase
         .from('app_settings')
         .select('*')
         .eq('id', 1)
         .single();
 
       if (data) {
-        setOwnerName(data.owner_name || 'Nikhil');
+        setOwnerName(data.owner_name || 'Owner');
         setAvatarUrl(data.avatar_url || '');
         setUsername(data.username || 'admin');
         setPassword(data.password || 'admin123');
       }
+
+      // 2. Fetch Database Record Footprint (500 MB quota)
+      const { count: jobCount } = await supabase.from('job_cards').select('*', { count: 'exact', head: true });
+      const { count: custCount } = await supabase.from('customers').select('*', { count: 'exact', head: true });
+      
+      const estimatedDbBytes = ((jobCount || 0) * 2048) + ((custCount || 0) * 1024) + (1024 * 60); 
+      const calcDbMB = Number((estimatedDbBytes / (1024 * 1024)).toFixed(2));
+      setDbUsageMB(calcDbMB > 0.01 ? calcDbMB : 0.05);
+      setDbUsagePercent(Math.max(1, Math.min(100, Math.round(((calcDbMB > 0.01 ? calcDbMB : 0.05) / 500) * 100))));
+
+      // 3. Scan Single 'job-card-media' Bucket Folders
+      let totalStorageBytes = 0;
+      const folders = ['photos', 'drawings', 'avatars'];
+      
+      for (const folder of folders) {
+        try {
+          const { data: files } = await supabase.storage
+            .from('job-card-media')
+            .list(folder, { limit: 100 });
+
+          if (files && Array.isArray(files)) {
+            files.forEach(f => {
+              if (f.metadata && f.metadata.size) {
+                totalStorageBytes += f.metadata.size;
+              }
+            });
+          }
+        } catch (bErr) {
+          console.warn(`Scan error in folder ${folder}:`, bErr);
+        }
+      }
+
+      // Total MB calculation for 1 GB (1024 MB)
+      const calcMediaMB = Number((totalStorageBytes / (1024 * 1024)).toFixed(2));
+      setMediaUsageMB(calcMediaMB);
+      setMediaUsagePercent(Math.min(100, Math.round((calcMediaMB / 1024) * 100)));
+
     } catch (err) {
       console.error('Error loading settings:', err.message);
     } finally {
@@ -92,7 +149,6 @@ export default function SettingsPage() {
       const newUrl = await uploadFileToBucket(file, 'avatars');
 
       if (newUrl) {
-        // Update DB
         await supabase
           .from('app_settings')
           .update({ avatar_url: newUrl, updated_at: new Date().toISOString() })
@@ -102,6 +158,7 @@ export default function SettingsPage() {
         setIsCropModalOpen(false);
         setImageSrc(null);
         alert('Profile picture updated successfully!');
+        fetchSettingsAndStorage();
       }
     } catch (e) {
       alert('Error cropping/uploading image: ' + e.message);
@@ -121,6 +178,7 @@ export default function SettingsPage() {
 
       setAvatarUrl('');
       alert('Profile picture removed!');
+      fetchSettingsAndStorage();
     } catch (err) {
       alert('Error removing photo: ' + err.message);
     } finally {
@@ -163,149 +221,221 @@ export default function SettingsPage() {
       <aside className={`fixed inset-y-0 left-0 w-[260px] bg-white/40 backdrop-blur-2xl border-r border-white/60 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-50 transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 flex flex-col ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="h-20 flex items-center justify-between px-8">
           <span className="text-xl font-black text-[#1a2b3c] tracking-wider">RA-XIS<span className="text-[#3db2a8]">.</span></span>
-          <button className="md:hidden text-gray-500 hover:text-[#3db2a8]" onClick={() => setIsMobileMenuOpen(false)}><svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+          <button className="md:hidden text-gray-500 hover:text-[#3db2a8]" onClick={() => setIsMobileMenuOpen(false)}>
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg>
+          </button>
         </div>
-        <nav className="flex-1 px-5 py-6 space-y-3 overflow-y-auto">
-          <Link href="/dashboard" className="flex items-center gap-3 px-4 py-3 text-gray-500 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">Dashboard</Link>
-          <Link href="/dashboard/new-customer" className="flex items-center gap-3 px-4 py-3 text-gray-500 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">New Customer</Link>
-          <Link href="/dashboard/repeat-order" className="flex items-center gap-3 px-4 py-3 text-gray-500 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">Repeat Order</Link>
-          <Link href="/dashboard/view-customer" className="flex items-center gap-3 px-4 py-3 text-gray-500 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">View / Edit Customer</Link>
-          <Link href="/dashboard/report" className="flex items-center gap-3 px-4 py-3 text-gray-500 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">Reports</Link>
+        
+        <nav className="flex-1 px-5 py-4 space-y-2 overflow-y-auto">
+          <Link href="/dashboard" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
+            <LayoutDashboard className="w-4 h-4 text-gray-400" />
+            Dashboard
+          </Link>
+          <Link href="/dashboard/new-order" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
+            <PlusCircle className="w-4 h-4 text-gray-400" />
+            New Order
+          </Link>
+          <Link href="/dashboard/orders" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
+            <ClipboardList className="w-4 h-4 text-gray-400" />
+            View Orders
+          </Link>
+          <Link href="/dashboard/new-customer" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
+            <UserPlus className="w-4 h-4 text-gray-400" />
+            New Customer
+          </Link>
+          <Link href="/dashboard/customers" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
+            <Users className="w-4 h-4 text-gray-400" />
+            View Customers
+          </Link>
+          <Link href="/dashboard/reports" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
+            <BarChart3 className="w-4 h-4 text-gray-400" />
+            Reports
+          </Link>
         </nav>
-        <div className="p-5"><Link href="/" className="flex items-center gap-3 px-4 py-3 text-gray-400 hover:text-red-500 hover:bg-white/40 rounded-2xl font-semibold transition-colors whitespace-nowrap">Logout</Link></div>
+
+        <div className="p-5 border-t border-white/40">
+          <Link href="/" className="flex items-center gap-3 px-4 py-3 text-gray-400 hover:text-red-500 hover:bg-white/40 rounded-2xl font-semibold transition-colors whitespace-nowrap">
+            <LogOut className="w-4 h-4" />
+            Logout
+          </Link>
+        </div>
       </aside>
 
-      {/* Main Content */}
+      {/* Main Container */}
       <div className="flex-1 flex flex-col overflow-hidden w-full z-10 relative">
         <header className="h-20 bg-white/30 backdrop-blur-xl border-b border-white/50 flex items-center justify-between px-4 md:px-8 relative z-50">
-          <div className="flex items-center">
-            <button className="md:hidden mr-4 text-gray-700 hover:text-[#3db2a8]" onClick={() => setIsMobileMenuOpen(true)}><svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
-            <span className="text-sm font-bold text-gray-500 hidden sm:inline">Settings & Credentials</span>
-          </div>
+          <span className="text-sm font-bold text-gray-500">Settings & Credentials</span>
           <div className="flex items-center gap-4">
             <div className="relative" ref={profileMenuRef}>
-              <div className="flex items-center cursor-pointer group p-1" onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}>
-                <div className="w-10 h-10 bg-white/90 backdrop-blur-md rounded-full overflow-hidden border border-white/80 flex items-center justify-center shadow-md">
-                  {avatarUrl ? (
-                    <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-                  ) : (
-                    <svg className="w-6 h-6 text-gray-600 mt-1" fill="currentColor" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" /></svg>
-                  )}
-                </div>
+              <div className="w-10 h-10 bg-white/90 backdrop-blur-md rounded-full overflow-hidden border border-white/80 flex items-center justify-center shadow-md cursor-pointer" onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}>
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="font-bold text-[#1a2b3c]">{ownerName ? ownerName.charAt(0) : 'O'}</span>
+                )}
               </div>
               {isProfileMenuOpen && (
                 <div className="absolute right-0 mt-3 w-56 bg-white/95 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/80 py-2 z-[100]">
-                  <div className="px-4 py-2 border-b border-gray-100"><p className="text-xs text-gray-400 font-semibold">Logged in as</p><p className="text-sm font-bold text-[#1a2b3c]">{ownerName}</p></div>
-                  <Link href="/dashboard/settings" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-[#3db2a8]">Settings</Link>
+                  <div className="px-4 py-2 border-b border-gray-100">
+                    <p className="text-xs text-gray-400 font-semibold">Logged in as</p>
+                    <p className="text-sm font-bold text-[#1a2b3c]">{ownerName}</p>
+                  </div>
+                  <Link href="/dashboard/settings" onClick={() => setIsProfileMenuOpen(false)} className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-[#3db2a8]">
+                    <Settings className="w-4 h-4" />
+                    Settings
+                  </Link>
                   <div className="border-t border-gray-100 my-1"></div>
-                  <Link href="/" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-red-500 hover:bg-red-50">Logout</Link>
+                  <Link href="/" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-red-500 hover:bg-red-50">
+                    <LogOut className="w-4 h-4" />
+                    Logout
+                  </Link>
                 </div>
               )}
             </div>
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-8">
-          <div className="max-w-3xl mx-auto mb-6">
-            <h1 className="text-xl md:text-2xl font-extrabold text-[#1a2b3c] tracking-tight">Profile & Security Settings</h1>
-            <p className="text-gray-500 text-[12px] md:text-[13px] mt-1 font-medium">Manage Owner identity, profile avatar crop, and login credentials.</p>
+        <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6">
+          <div className="max-w-4xl mx-auto">
+            <h1 className="text-xl md:text-2xl font-black text-[#1a2b3c] tracking-tight">System Settings & Storage</h1>
+            <p className="text-gray-500 text-xs mt-1 font-medium">Manage Owner identity, credentials, and live Supabase storage limits.</p>
           </div>
 
-          <form onSubmit={handleSaveSettings} className="max-w-3xl mx-auto space-y-6 pb-12">
-            {/* 1. Profile Picture Circle + Crop */}
-            <div className="bg-white/40 backdrop-blur-2xl p-6 md:p-8 rounded-[2rem] shadow-sm border border-white/60 flex flex-col sm:flex-row items-center gap-6">
-              <div className="w-28 h-28 rounded-full border-4 border-white shadow-xl overflow-hidden bg-gray-100 flex items-center justify-center relative flex-shrink-0">
-                {avatarUrl ? (
-                  <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-                ) : (
-                  <span className="text-3xl text-gray-400 font-black">{ownerName ? ownerName[0]?.toUpperCase() : 'O'}</span>
-                )}
-              </div>
-              <div className="space-y-3 text-center sm:text-left">
-                <h3 className="font-extrabold text-[#1a2b3c] text-sm">Profile Avatar</h3>
-                <p className="text-xs text-gray-500">Upload a square or portrait photo. You can crop it seamlessly.</p>
-                <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
-                  <input type="file" ref={fileInputRef} accept="image/*" onChange={onSelectFile} className="hidden" />
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="px-4 py-2 bg-[#3db2a8] hover:bg-[#359d94] text-white text-xs font-bold rounded-xl shadow-sm transition-all"
-                  >
-                    Replace Photo
-                  </button>
-                  {avatarUrl && (
-                    <button
-                      type="button"
-                      onClick={handleRemovePhoto}
-                      className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold rounded-xl border border-red-200 transition-all"
-                    >
-                      Remove
-                    </button>
+          <div className="max-w-4xl mx-auto space-y-6 pb-12">
+            
+            {/* 1. TOP: Profile Photo & Credentials Form */}
+            <form onSubmit={handleSaveSettings} className="space-y-6">
+              
+              {/* Profile Avatar Circle + Crop */}
+              <div className="bg-white/40 backdrop-blur-2xl p-6 md:p-8 rounded-[2rem] shadow-sm border border-white/60 flex flex-col sm:flex-row items-center gap-6">
+                <div className="w-24 h-24 rounded-full border-4 border-white shadow-xl overflow-hidden bg-gray-100 flex items-center justify-center relative flex-shrink-0">
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-3xl text-gray-400 font-black">{ownerName ? ownerName[0]?.toUpperCase() : 'O'}</span>
                   )}
                 </div>
+                <div className="space-y-2 text-center sm:text-left">
+                  <h3 className="font-extrabold text-[#1a2b3c] text-sm">Owner Profile Photo</h3>
+                  <p className="text-xs text-gray-500">Upload a photo. You can crop it seamlessly into a perfect circle.</p>
+                  <div className="flex flex-wrap gap-2 justify-center sm:justify-start pt-1">
+                    <input type="file" ref={fileInputRef} accept="image/*" onChange={onSelectFile} className="hidden" />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-4 py-2 bg-[#3db2a8] hover:bg-[#359d94] text-white text-xs font-bold rounded-xl shadow-sm transition cursor-pointer"
+                    >
+                      Change Photo
+                    </button>
+                    {avatarUrl && (
+                      <button
+                        type="button"
+                        onClick={handleRemovePhoto}
+                        className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold rounded-xl border border-red-200 transition cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
 
-            {/* 2. Owner Name */}
-            <div className="bg-white/40 backdrop-blur-2xl p-6 md:p-8 rounded-[2rem] shadow-sm border border-white/60">
-              <h2 className="text-[15px] font-extrabold text-[#1a2b3c] mb-4 pb-2 border-b border-gray-300/30">Owner Identity</h2>
-              <div>
-                <label className="block font-bold text-gray-500 mb-2 uppercase text-xs">Owner Name *</label>
-                <input
-                  type="text"
-                  required
-                  value={ownerName}
-                  onChange={(e) => setOwnerName(e.target.value)}
-                  className="w-full bg-white/60 border border-white/80 rounded-xl px-4 py-3 text-xs font-bold text-[#1a2b3c] focus:outline-none focus:ring-2 focus:ring-[#3db2a8]"
-                  placeholder="Enter Owner Name"
+              {/* Owner Identity & Security Credentials */}
+              <div className="bg-white/40 backdrop-blur-2xl p-6 md:p-8 rounded-[2rem] shadow-sm border border-white/60 space-y-4">
+                <h2 className="text-[15px] font-extrabold text-[#1a2b3c] pb-2 border-b border-gray-300/30">Owner Details & Security Credentials</h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                  <div>
+                    <label className="block font-bold text-gray-500 mb-1.5 uppercase text-[10px]">Owner Name *</label>
+                    <input
+                      type="text"
+                      required
+                      value={ownerName}
+                      onChange={(e) => setOwnerName(e.target.value)}
+                      className="w-full bg-white/70 border border-white/90 rounded-xl px-4 py-2.5 font-bold text-[#1a2b3c] focus:outline-none focus:ring-2 focus:ring-[#3db2a8]"
+                      placeholder="e.g. Nikhil"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-gray-500 mb-1.5 uppercase text-[10px]">Username *</label>
+                    <input
+                      type="text"
+                      required
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      className="w-full bg-white/70 border border-white/90 rounded-xl px-4 py-2.5 font-semibold focus:outline-none focus:ring-2 focus:ring-[#3db2a8]"
+                      placeholder="Enter login username"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-gray-500 mb-1.5 uppercase text-[10px]">Password *</label>
+                    <input
+                      type="password"
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full bg-white/70 border border-white/90 rounded-xl px-4 py-2.5 font-semibold focus:outline-none focus:ring-2 focus:ring-[#3db2a8]"
+                      placeholder="Enter login password"
+                    />
+                  </div>
+                </div>
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="bg-[#3db2a8] hover:bg-[#359d94] disabled:opacity-50 text-white font-bold py-2.5 px-6 rounded-xl shadow-md text-xs cursor-pointer transition-all"
+                  >
+                    {saving ? 'Saving...' : 'Save Credentials'}
+                  </button>
+                </div>
+              </div>
+            </form>
+
+            {/* 2. BOTTOM: Supabase Live Storage Usage (Liquid Progress Bars) */}
+            <div className="bg-white/40 backdrop-blur-2xl p-6 md:p-8 rounded-[2rem] shadow-sm border border-white/60 space-y-4">
+              <div className="border-b border-gray-200/40 pb-3 flex justify-between items-center">
+                <div>
+                  <h2 className="text-sm font-extrabold text-[#1a2b3c] flex items-center gap-2">
+                    <Database className="w-4 h-4 text-[#3db2a8]" />
+                    <span>Supabase Live Storage Usage</span>
+                  </h2>
+                  <p className="text-[11px] text-gray-500">Live storage monitoring for PostgreSQL records and media files</p>
+                </div>
+                <button
+                  onClick={fetchSettingsAndStorage}
+                  className="text-[11px] font-bold text-[#3db2a8] hover:underline"
+                >
+                  ↻ Refresh Stats
+                </button>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-around gap-6 pt-2">
+                {/* 1. Database Quota (500 MB) */}
+                <LiquidProgressBar
+                  title="Database Records"
+                  percentage={dbUsagePercent}
+                  usedText={`${dbUsageMB} MB`}
+                  totalText="500 MB"
+                  liquidColor="#3db2a8"
+                  waveAccent="rgba(61, 178, 168, 0.4)"
                 />
-                <p className="text-[11px] text-gray-400 mt-1">This name will appear on the dashboard header (e.g., Hello, {ownerName}).</p>
+
+                {/* 2. Media Bucket Storage (1 GB) */}
+                <LiquidProgressBar
+                  title="Media Bucket (Images)"
+                  percentage={mediaUsagePercent}
+                  usedText={`${mediaUsageMB} MB`}
+                  totalText="1 GB"
+                  liquidColor="#1a2b3c"
+                  waveAccent="rgba(26, 43, 60, 0.4)"
+                />
               </div>
             </div>
 
-            {/* 3. Security Credentials */}
-            <div className="bg-white/40 backdrop-blur-2xl p-6 md:p-8 rounded-[2rem] shadow-sm border border-white/60">
-              <h2 className="text-[15px] font-extrabold text-[#1a2b3c] mb-4 pb-2 border-b border-gray-300/30">Login & Security Credentials</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                <div>
-                  <label className="block font-bold text-gray-500 mb-2 uppercase text-[10px]">Username *</label>
-                  <input
-                    type="text"
-                    required
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    className="w-full bg-white/60 border border-white/80 rounded-xl px-4 py-3 font-semibold focus:outline-none focus:ring-2 focus:ring-[#3db2a8]"
-                    placeholder="Enter login username"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-gray-500 mb-2 uppercase text-[10px]">Password *</label>
-                  <input
-                    type="password"
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-white/60 border border-white/80 rounded-xl px-4 py-3 font-semibold focus:outline-none focus:ring-2 focus:ring-[#3db2a8]"
-                    placeholder="Enter login password"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-2 flex justify-end">
-              <button
-                type="submit"
-                disabled={saving}
-                className="bg-[#3db2a8] hover:bg-[#359d94] disabled:opacity-50 text-white font-bold py-3 px-8 rounded-2xl shadow-lg text-xs cursor-pointer transition-all"
-              >
-                {saving ? 'Saving...' : 'Save Settings'}
-              </button>
-            </div>
-          </form>
+          </div>
         </main>
       </div>
 
-      {/* Modern Circular Image Crop Modal */}
+      {/* Crop Modal */}
       {isCropModalOpen && imageSrc && (
         <div className="fixed inset-0 bg-[#0f172a]/80 backdrop-blur-md z-[9999] flex items-center justify-center p-4">
           <div className="bg-white rounded-[2rem] p-6 max-w-md w-full flex flex-col items-center">

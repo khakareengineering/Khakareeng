@@ -4,12 +4,25 @@ import { useRouter } from 'next/navigation';
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { uploadFileToBucket } from '@/lib/storage';
+import { 
+  LayoutDashboard, 
+  PlusCircle, 
+  ClipboardList, 
+  UserPlus, 
+  Users, 
+  BarChart3, 
+  Settings, 
+  LogOut 
+} from 'lucide-react';
 
-export default function RepeatOrderPage() {
+export default function NewOrderPage() {
   const router = useRouter();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Owner Info
+  const [ownerInfo, setOwnerInfo] = useState({ name: 'Owner', avatar: '' });
 
   // Customer Autocomplete / Selection
   const [customersList, setCustomersList] = useState([]);
@@ -43,7 +56,7 @@ export default function RepeatOrderPage() {
   const profileMenuRef = useRef(null);
 
   useEffect(() => {
-    fetchCustomers();
+    fetchInitialData();
     function handleClickOutside(event) {
       if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
         setIsProfileMenuOpen(false);
@@ -53,8 +66,23 @@ export default function RepeatOrderPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const fetchCustomers = async () => {
+  const fetchInitialData = async () => {
     try {
+      // 1. Fetch Owner Settings
+      const { data: settingsData } = await supabase
+        .from('app_settings')
+        .select('owner_name, avatar_url')
+        .eq('id', 1)
+        .single();
+
+      if (settingsData) {
+        setOwnerInfo({
+          name: settingsData.owner_name || 'Owner',
+          avatar: settingsData.avatar_url || ''
+        });
+      }
+
+      // 2. Fetch Active Customers
       const { data, error } = await supabase
         .from('customers')
         .select('id, name, city, contact_no')
@@ -90,10 +118,10 @@ export default function RepeatOrderPage() {
     setCustomerSearch('');
   };
 
-  const handleSaveRepeatOrder = async (e) => {
+  const handleSaveOrder = async (e) => {
     e.preventDefault();
     if (!selectedCustomerId) {
-      alert('कृपया आधी Existing Customer निवडा!');
+      alert('कृपया आधी Customer निवडा किंवा New Customer मधून ॲड करा!');
       return;
     }
 
@@ -113,7 +141,7 @@ export default function RepeatOrderPage() {
         if (url) drawingUrls.push(url);
       }
 
-      // 2. Insert Repeat Job Card linked to customer
+      // 2. Insert Job Card linked to customer
       const { error } = await supabase
         .from('job_cards')
         .insert([{
@@ -139,10 +167,10 @@ export default function RepeatOrderPage() {
 
       if (error) throw error;
 
-      alert('Repeat Order Job Card Saved Successfully!');
-      router.push('/dashboard');
+      alert('New Order Job Card Saved Successfully!');
+      router.push('/dashboard/orders');
     } catch (err) {
-      console.error('Error creating repeat order:', err);
+      console.error('Error creating order:', err);
       alert('Error: ' + err.message);
     } finally {
       setIsSubmitting(false);
@@ -156,40 +184,89 @@ export default function RepeatOrderPage() {
 
       {isMobileMenuOpen && <div className="fixed inset-0 bg-[#1a2b3c]/20 backdrop-blur-sm z-40 md:hidden" onClick={() => setIsMobileMenuOpen(false)}></div>}
 
-      {/* Sidebar */}
+      {/* 6-Item Standard Sidebar */}
       <aside className={`fixed inset-y-0 left-0 w-[260px] bg-white/40 backdrop-blur-2xl border-r border-white/60 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-50 transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 flex flex-col ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="h-20 flex items-center justify-between px-8">
           <span className="text-xl font-black text-[#1a2b3c] tracking-wider">RA-XIS<span className="text-[#3db2a8]">.</span></span>
-          <button className="md:hidden text-gray-500 hover:text-[#3db2a8]" onClick={() => setIsMobileMenuOpen(false)}><svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+          <button className="md:hidden text-gray-500 hover:text-[#3db2a8]" onClick={() => setIsMobileMenuOpen(false)}>
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg>
+          </button>
         </div>
-        <nav className="flex-1 px-5 py-6 space-y-3 overflow-y-auto">
-          <Link href="/dashboard" className="flex items-center gap-3 px-4 py-3 text-gray-500 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">Dashboard</Link>
-          <Link href="/dashboard/new-customer" className="flex items-center gap-3 px-4 py-3 text-gray-500 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">New Customer</Link>
-          <Link href="/dashboard/repeat-order" className="flex items-center gap-3 px-4 py-3 bg-white/60 backdrop-blur-md shadow-sm border border-white/50 text-[#3db2a8] font-bold rounded-2xl relative transition-all whitespace-nowrap"><div className="absolute left-1.5 top-2 bottom-2 w-1.5 bg-[#3db2a8] rounded-full"></div>Repeat Order</Link>
-          <Link href="/dashboard/view-customer" className="flex items-center gap-3 px-4 py-3 text-gray-500 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">View / Edit Customer</Link>
-          <Link href="/dashboard/report" className="flex items-center gap-3 px-4 py-3 text-gray-500 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">Reports</Link>
+        
+        <nav className="flex-1 px-5 py-4 space-y-2 overflow-y-auto">
+          <Link href="/dashboard" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
+            <LayoutDashboard className="w-4 h-4 text-gray-400" />
+            Dashboard
+          </Link>
+          <Link href="/dashboard/new-order" className="flex items-center gap-3 px-4 py-3 bg-white/60 backdrop-blur-md shadow-sm border border-white/50 text-[#3db2a8] font-bold rounded-2xl relative transition-all whitespace-nowrap">
+            <div className="absolute left-1.5 top-2 bottom-2 w-1.5 bg-[#3db2a8] rounded-full"></div>
+            <PlusCircle className="w-4 h-4 text-[#3db2a8]" />
+            New Order
+          </Link>
+          <Link href="/dashboard/orders" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
+            <ClipboardList className="w-4 h-4 text-gray-400" />
+            View Orders
+          </Link>
+          <Link href="/dashboard/new-customer" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
+            <UserPlus className="w-4 h-4 text-gray-400" />
+            New Customer
+          </Link>
+          <Link href="/dashboard/customers" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
+            <Users className="w-4 h-4 text-gray-400" />
+            View Customers
+          </Link>
+          <Link href="/dashboard/reports" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
+            <BarChart3 className="w-4 h-4 text-gray-400" />
+            Reports
+          </Link>
         </nav>
-        <div className="p-5"><Link href="/" className="flex items-center gap-3 px-4 py-3 text-gray-400 hover:text-red-500 hover:bg-white/40 rounded-2xl font-semibold transition-colors whitespace-nowrap">Logout</Link></div>
+
+        <div className="p-5 border-t border-white/40">
+          <Link href="/" className="flex items-center gap-3 px-4 py-3 text-gray-400 hover:text-red-500 hover:bg-white/40 rounded-2xl font-semibold transition-colors whitespace-nowrap">
+            <LogOut className="w-4 h-4" />
+            Logout
+          </Link>
+        </div>
       </aside>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden w-full z-10 relative">
         <header className="h-20 bg-white/30 backdrop-blur-xl border-b border-white/50 flex items-center justify-between px-4 md:px-8 relative z-50">
           <div className="flex items-center">
-            <button className="md:hidden mr-4 text-gray-700 hover:text-[#3db2a8]" onClick={() => setIsMobileMenuOpen(true)}><svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
-            <span className="text-sm font-bold text-gray-500 hidden sm:inline">Quick Order Management</span>
+            <button className="md:hidden mr-4 text-gray-700 hover:text-[#3db2a8]" onClick={() => setIsMobileMenuOpen(true)}>
+              <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+            </button>
+            <span className="text-sm font-bold text-gray-500 hidden sm:inline">Khakare Engineering Tool Room</span>
           </div>
+
+          {/* Profile Menu */}
           <div className="flex items-center gap-4">
             <div className="relative" ref={profileMenuRef}>
               <div className="flex items-center cursor-pointer group p-1" onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}>
-                <div className="w-10 h-10 bg-white/90 backdrop-blur-md rounded-full overflow-hidden border border-white/80 flex items-center justify-center shadow-md"><svg className="w-6 h-6 text-gray-600 mt-1" fill="currentColor" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" /></svg></div>
+                <div className="w-10 h-10 bg-white/90 backdrop-blur-md rounded-full overflow-hidden border border-white/80 flex items-center justify-center shadow-md">
+                  {ownerInfo.avatar ? (
+                    <img src={ownerInfo.avatar} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="font-bold text-[#1a2b3c]">{ownerInfo.name.charAt(0)}</span>
+                  )}
+                </div>
               </div>
+
               {isProfileMenuOpen && (
                 <div className="absolute right-0 mt-3 w-56 bg-white/95 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/80 py-2 z-[100]">
-                  <div className="px-4 py-2 border-b border-gray-100"><p className="text-xs text-gray-400 font-semibold">Logged in as</p><p className="text-sm font-bold text-[#1a2b3c]">Nikhil</p></div>
-                  <Link href="/dashboard/settings" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:text-[#3db2a8]">Settings</Link>
+                  <div className="px-4 py-2 border-b border-gray-100">
+                    <p className="text-xs text-gray-400 font-semibold">Logged in as</p>
+                    <p className="text-sm font-bold text-[#1a2b3c]">{ownerInfo.name}</p>
+                  </div>
+                  <Link href="/dashboard/settings" onClick={() => setIsProfileMenuOpen(false)} className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:text-[#3db2a8] hover:bg-slate-50 transition">
+                    <Settings className="w-4 h-4" />
+                    Settings
+                  </Link>
                   <div className="border-t border-gray-100 my-1"></div>
-                  <Link href="/" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-red-500 hover:bg-red-50">Logout</Link>
+                  <Link href="/" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-red-500 hover:bg-red-50 transition">
+                    <LogOut className="w-4 h-4" />
+                    Logout
+                  </Link>
                 </div>
               )}
             </div>
@@ -198,14 +275,20 @@ export default function RepeatOrderPage() {
 
         <main className="flex-1 overflow-y-auto p-4 md:p-8">
           <div className="max-w-5xl mx-auto mb-6">
-            <h1 className="text-xl md:text-2xl font-extrabold text-[#1a2b3c] tracking-tight">Create Repeat Order</h1>
-            <p className="text-gray-500 text-[12px] md:text-[13px] mt-1 font-medium">Search existing customer by ID or Name and add a new gear order instantly.</p>
+            <h1 className="text-xl md:text-2xl font-extrabold text-[#1a2b3c] tracking-tight">Create New Order</h1>
+            <p className="text-gray-500 text-[12px] md:text-[13px] mt-1 font-medium">Search customer by ID or Name and create a gear manufacturing job card.</p>
           </div>
 
-          <form onSubmit={handleSaveRepeatOrder} className="max-w-5xl mx-auto space-y-6 pb-12">
+          <form onSubmit={handleSaveOrder} className="max-w-5xl mx-auto space-y-6 pb-12">
             {/* Step 1: Select Customer */}
             <div className="bg-white/40 backdrop-blur-2xl p-6 md:p-8 rounded-[2rem] shadow-sm border border-white/60">
-              <h2 className="text-[15px] font-extrabold text-[#1a2b3c] mb-4">1. Select Existing Customer</h2>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-[15px] font-extrabold text-[#1a2b3c]">1. Customer Selection</h2>
+                <Link href="/dashboard/new-customer" className="text-xs font-bold text-[#3db2a8] hover:underline">
+                  + Add New Customer
+                </Link>
+              </div>
+
               {selectedCustomerId ? (
                 <div className="flex items-center justify-between bg-[#3db2a8]/10 border border-[#3db2a8]/30 px-5 py-3.5 rounded-2xl">
                   <div>
@@ -220,7 +303,7 @@ export default function RepeatOrderPage() {
                     type="text"
                     value={customerSearch}
                     onChange={(e) => setCustomerSearch(e.target.value)}
-                    placeholder="Type Customer ID (e.g. #1001) or Name (e.g. Rahul)..."
+                    placeholder="Search by Customer ID (e.g. #1001) or Name (e.g. Rahul)..."
                     className="w-full bg-white/60 border border-white/80 rounded-xl px-4 py-3.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#3db2a8]"
                   />
                   {filteredCustomers.length > 0 && (
@@ -293,7 +376,7 @@ export default function RepeatOrderPage() {
             <div className="pt-2 flex justify-end gap-3">
               <button type="button" onClick={() => router.push('/dashboard')} className="px-6 py-3 bg-white/60 hover:bg-white text-gray-600 font-bold rounded-2xl text-xs transition-all">Cancel</button>
               <button type="submit" disabled={isSubmitting} className="bg-[#3db2a8] hover:bg-[#359d94] disabled:opacity-50 text-white font-bold py-3 px-8 rounded-2xl shadow-lg text-xs cursor-pointer transition-all">
-                {isSubmitting ? 'Saving Repeat Order...' : 'Save Repeat Order'}
+                {isSubmitting ? 'Saving Order...' : 'Save Order & Job Card'}
               </button>
             </div>
           </form>
