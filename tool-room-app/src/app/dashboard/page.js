@@ -10,32 +10,40 @@ import {
   Users, 
   BarChart3, 
   Settings, 
-  LogOut 
+  LogOut,
+  ArrowUpRight,
+  ArrowUp,
+  ArrowDown,
+  Activity,
+  Menu,
+  X
 } from 'lucide-react';
 
 export default function DashboardPage() {
   const [timeRange, setTimeRange] = useState('This Month');
   const [ownerInfo, setOwnerInfo] = useState({ name: 'Owner', avatar: '' });
+  
+  // 5 Status Cards: Total Jobs, Pending, In-Production, Completed, Delivered
   const [stats, setStats] = useState({
     totalJobs: 0,
     pending: 0,
     inProduction: 0,
     completed: 0,
-    customers: 0,
-    growthPercent: 0
+    delivered: 0
   });
+  
+  // Custom 3-Pillar Metrics: Overall Job Growth, Total Output (Pcs), Shop Efficiency (%)
+  const [pulseMetrics, setPulseMetrics] = useState({
+    jobGrowth: { count: 0, percent: 0, isUp: true },
+    totalOutputPcs: 0,
+    efficiency: { percent: 0, isUp: false }
+  });
+
   const [recentJobs, setRecentJobs] = useState([]);
   const [allJobs, setAllJobs] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Quick Status Update Modal State
-  const [isManageOrdersOpen, setIsManageOrdersOpen] = useState(false);
-  const [selectedJobToUpdate, setSelectedJobToUpdate] = useState(null);
-  const [updatedStatus, setUpdatedStatus] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All Status');
-  const [searchModalTerm, setSearchModalTerm] = useState('');
-
-  // Profile menu state
+  // Profile and Mobile menu state
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const profileMenuRef = useRef(null);
@@ -54,31 +62,31 @@ export default function DashboardPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const getDateFilterThreshold = (range) => {
+  const getDateFilterThresholds = (range) => {
     const now = new Date();
-    let startDate = new Date();
-    let prevStartDate = new Date();
+    let currentStart = new Date();
+    let prevStart = new Date();
 
     if (range === 'This Week') {
       const day = now.getDay() || 7;
-      startDate.setDate(now.getDate() - day + 1);
-      startDate.setHours(0, 0, 0, 0);
-      prevStartDate = new Date(startDate);
-      prevStartDate.setDate(prevStartDate.getDate() - 7);
+      currentStart.setDate(now.getDate() - day + 1);
+      currentStart.setHours(0, 0, 0, 0);
+      prevStart = new Date(currentStart);
+      prevStart.setDate(prevStart.getDate() - 7);
     } else if (range === 'This Month') {
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-      prevStartDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      currentStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     } else if (range === 'This Year') {
-      startDate = new Date(now.getFullYear(), 0, 1);
-      prevStartDate = new Date(now.getFullYear() - 1, 0, 1);
+      currentStart = new Date(now.getFullYear(), 0, 1);
+      prevStart = new Date(now.getFullYear() - 1, 0, 1);
     } else {
-      startDate = new Date('1970-01-01');
-      prevStartDate = new Date('1970-01-01');
+      currentStart = new Date('1970-01-01');
+      prevStart = new Date('1970-01-01');
     }
 
     return {
-      currentStart: startDate.toISOString().split('T')[0],
-      prevStart: prevStartDate.toISOString().split('T')[0]
+      currentStr: currentStart.toISOString().split('T')[0],
+      prevStr: prevStart.toISOString().split('T')[0]
     };
   };
 
@@ -100,14 +108,7 @@ export default function DashboardPage() {
         });
       }
 
-      // 2. Fetch Active Customers Count
-      const { count: custCount, error: custErr } = await supabase
-        .from('customers')
-        .select('*', { count: 'exact', head: true })
-        .eq('is_active', true);
-      if (custErr) throw custErr;
-
-      // 3. Fetch Job Cards with customer names
+      // 2. Fetch Job Cards with customer details
       const { data: jobsData, error: jobErr } = await supabase
         .from('job_cards')
         .select(`
@@ -118,6 +119,7 @@ export default function DashboardPage() {
           qty,
           gear_price,
           tc_amt,
+          material_grade,
           customer_id,
           customers ( id, name )
         `)
@@ -128,54 +130,58 @@ export default function DashboardPage() {
       const jobs = jobsData || [];
       setAllJobs(jobs);
 
-      const { currentStart, prevStart } = getDateFilterThreshold(selectedRange);
+      const { currentStr, prevStr } = getDateFilterThresholds(selectedRange);
 
       const periodJobs = selectedRange === 'All Time'
         ? jobs
-        : jobs.filter(j => j.order_date >= currentStart);
+        : jobs.filter(j => (j.order_date || '') >= currentStr);
 
       const prevPeriodJobs = selectedRange === 'All Time'
         ? []
-        : jobs.filter(j => j.order_date >= prevStart && j.order_date < currentStart);
-
-      let growth = 0;
-      if (prevPeriodJobs.length > 0) {
-        growth = Math.round(((periodJobs.length - prevPeriodJobs.length) / prevPeriodJobs.length) * 100);
-      } else if (periodJobs.length > 0) {
-        growth = 100;
-      }
+        : jobs.filter(j => (j.order_date || '') >= prevStr && (j.order_date || '') < currentStr);
 
       setRecentJobs(periodJobs.slice(0, 5));
 
+      // 3. Calculate Master Metrics
+      const currentJobsCount = periodJobs.length;
+      const prevJobsCount = prevPeriodJobs.length;
+      let jobGrowthPercent = 0;
+      let jobGrowthIsUp = true;
+
+      if (prevJobsCount > 0) {
+        jobGrowthPercent = Math.round(((currentJobsCount - prevJobsCount) / prevJobsCount) * 100);
+        jobGrowthIsUp = jobGrowthPercent >= 0;
+      } else {
+        jobGrowthPercent = currentJobsCount > 0 ? 100 : 0;
+        jobGrowthIsUp = true;
+      }
+
+      // Total Output (Pcs)
+      const totalPcs = periodJobs.reduce((sum, j) => sum + (parseInt(j.qty) || 1), 0);
+
+      // Shop Efficiency (Completed + Delivered vs Total)
+      const finishedCount = periodJobs.filter(j => j.status === 'Completed' || j.status === 'Delivered').length;
+      const efficiencyPct = periodJobs.length > 0 ? Math.round((finishedCount / periodJobs.length) * 100) : 0;
+      const efficiencyIsUp = periodJobs.length > 0 && finishedCount > 0 && efficiencyPct >= 50;
+
+      setPulseMetrics({
+        jobGrowth: { count: currentJobsCount, percent: jobGrowthPercent, isUp: jobGrowthIsUp },
+        totalOutputPcs: totalPcs,
+        efficiency: { percent: efficiencyPct, isUp: efficiencyIsUp }
+      });
+
+      // 4. Main 5 Stat Cards: TOTAL JOBS, PENDING, IN-PRODUCTION, COMPLETED, DELIVERED
       setStats({
         totalJobs: periodJobs.length,
         pending: periodJobs.filter(j => j.status === 'Pending').length,
         inProduction: periodJobs.filter(j => j.status === 'In-Production').length,
-        completed: periodJobs.filter(j => j.status === 'Completed' || j.status === 'Delivered').length,
-        customers: custCount || 0,
-        growthPercent: growth
+        completed: periodJobs.filter(j => j.status === 'Completed').length,
+        delivered: periodJobs.filter(j => j.status === 'Delivered').length
       });
     } catch (err) {
       console.error('Error fetching dashboard data:', err.message);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleStatusSave = async () => {
-    if (!selectedJobToUpdate || !updatedStatus) return;
-    try {
-      const { error } = await supabase
-        .from('job_cards')
-        .update({ status: updatedStatus, updated_at: new Date().toISOString() })
-        .eq('id', selectedJobToUpdate.id);
-
-      if (error) throw error;
-      alert('Status updated successfully!');
-      setSelectedJobToUpdate(null);
-      fetchDashboardData(timeRange);
-    } catch (err) {
-      alert('Error updating status: ' + err.message);
     }
   };
 
@@ -188,89 +194,86 @@ export default function DashboardPage() {
     }
   };
 
-  const filteredModalJobs = allJobs.filter(j => {
-    const matchesStatus = statusFilter === 'All Status' || j.status === statusFilter;
-    const custName = j.customers?.name || '';
-    const q = searchModalTerm.toLowerCase();
-    const matchesSearch = custName.toLowerCase().includes(q) || j.id.toString().includes(q) || j.model?.toLowerCase().includes(q);
-    return matchesStatus && matchesSearch;
-  });
-
   return (
     <div className="flex h-screen bg-[#f0f4f8] font-sans text-gray-800 antialiased overflow-hidden relative">
       <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-[#3db2a8]/20 rounded-full blur-[80px] z-0 pointer-events-none"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] bg-[#1a2b3c]/10 rounded-full blur-[100px] z-0 pointer-events-none"></div>
 
-      {isMobileMenuOpen && <div className="fixed inset-0 bg-[#1a2b3c]/20 backdrop-blur-sm z-40 md:hidden" onClick={() => setIsMobileMenuOpen(false)}></div>}
+      {isMobileMenuOpen && (
+        <div className="fixed inset-0 bg-[#1a2b3c]/30 backdrop-blur-xs z-40 lg:hidden" onClick={() => setIsMobileMenuOpen(false)}></div>
+      )}
 
-      {/* 6-Item Clear Sidebar */}
-      <aside className={`fixed inset-y-0 left-0 w-[260px] bg-white/40 backdrop-blur-2xl border-r border-white/60 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-50 transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 flex flex-col ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="h-20 flex items-center justify-between px-8">
-          <span className="text-xl font-black text-[#1a2b3c] tracking-wider">RA-XIS<span className="text-[#3db2a8]">.</span></span>
-          <button className="md:hidden text-gray-500 hover:text-[#3db2a8]" onClick={() => setIsMobileMenuOpen(false)}>
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg>
+      {/* Sidebar with Large Prominent Brand Logo */}
+      <aside className={`fixed inset-y-0 left-0 w-[260px] bg-white/40 backdrop-blur-2xl border-r border-white/60 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-50 transform transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0 flex flex-col ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        
+        {/* Prominent High-Visibility Brand Logo Area */}
+        <div className="h-28 flex items-center justify-between px-5 border-b border-white/40">
+          <Link href="/dashboard" className="flex items-center justify-center w-full">
+            <img 
+              src="/logo.png" 
+              alt="Khakare Engineering Logo" 
+              className="h-20 w-auto max-w-[210px] object-contain drop-shadow-md hover:scale-105 transition-transform duration-300" 
+            />
+          </Link>
+          <button className="lg:hidden text-gray-500 hover:text-[#3db2a8] ml-2" onClick={() => setIsMobileMenuOpen(false)}>
+            <X className="w-6 h-6" />
           </button>
         </div>
         
         <nav className="flex-1 px-5 py-4 space-y-2 overflow-y-auto">
-          <Link href="/dashboard" className="flex items-center gap-3 px-4 py-3 bg-white/60 backdrop-blur-md shadow-sm border border-white/50 text-[#3db2a8] font-bold rounded-2xl relative transition-all whitespace-nowrap">
+          <Link href="/dashboard" className="flex items-center gap-3 px-4 py-3 bg-white/60 backdrop-blur-md shadow-xs border border-white/50 text-[#3db2a8] font-bold rounded-2xl relative transition-all whitespace-nowrap">
             <div className="absolute left-1.5 top-2 bottom-2 w-1.5 bg-[#3db2a8] rounded-full"></div>
-            <LayoutDashboard className="w-4 h-4 text-[#3db2a8]" />
-            Dashboard
+            <LayoutDashboard className="w-5 h-5 text-[#3db2a8]" />
+            <span className="text-sm">Dashboard</span>
           </Link>
           <Link href="/dashboard/new-order" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
-            <PlusCircle className="w-4 h-4 text-gray-400" />
-            New Order
+            <PlusCircle className="w-5 h-5 text-gray-400" />
+            <span className="text-sm">New Order</span>
           </Link>
           <Link href="/dashboard/orders" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
-            <ClipboardList className="w-4 h-4 text-gray-400" />
-            View Orders
+            <ClipboardList className="w-5 h-5 text-gray-400" />
+            <span className="text-sm">View Orders</span>
           </Link>
           <Link href="/dashboard/new-customer" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
-            <UserPlus className="w-4 h-4 text-gray-400" />
-            New Customer
+            <UserPlus className="w-5 h-5 text-gray-400" />
+            <span className="text-sm">New Customer</span>
           </Link>
           <Link href="/dashboard/customers" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
-            <Users className="w-4 h-4 text-gray-400" />
-            View Customers
+            <Users className="w-5 h-5 text-gray-400" />
+            <span className="text-sm">View Customers</span>
           </Link>
           <Link href="/dashboard/reports" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
-            <BarChart3 className="w-4 h-4 text-gray-400" />
-            Reports
+            <BarChart3 className="w-5 h-5 text-gray-400" />
+            <span className="text-sm">Reports</span>
           </Link>
         </nav>
 
         <div className="p-5 border-t border-white/40">
           <Link href="/" className="flex items-center gap-3 px-4 py-3 text-gray-400 hover:text-red-500 hover:bg-white/40 rounded-2xl font-semibold transition-colors whitespace-nowrap">
-            <LogOut className="w-4 h-4" />
-            Logout
+            <LogOut className="w-5 h-5" />
+            <span className="text-sm">Logout</span>
           </Link>
         </div>
       </aside>
 
-      {/* Main Content */}
+      {/* Main Container */}
       <div className="flex-1 flex flex-col overflow-hidden w-full z-10 relative">
-        <header className="h-20 bg-white/30 backdrop-blur-xl border-b border-white/50 flex items-center justify-between px-4 md:px-8 relative z-50">
-          <div className="flex items-center">
-            <button className="md:hidden mr-4 text-gray-700 hover:text-[#3db2a8]" onClick={() => setIsMobileMenuOpen(true)}>
-              <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+        <header className="h-20 bg-white/30 backdrop-blur-xl border-b border-white/50 flex items-center justify-between px-4 md:px-8 relative z-50 shrink-0">
+          <div className="flex items-center gap-3">
+            <button className="lg:hidden p-2 text-gray-600 hover:bg-white/50 rounded-xl" onClick={() => setIsMobileMenuOpen(true)}>
+              <Menu className="w-6 h-6" />
             </button>
-            <span className="text-sm font-bold text-gray-500 hidden sm:inline">Khakare Engineering Tool Room</span>
+            <span className="text-sm md:text-base font-extrabold text-[#1a2b3c] tracking-tight">Khakare Engineering</span>
           </div>
-
-          {/* Top Right Profile Icon & Menu with Settings */}
           <div className="flex items-center gap-4">
             <div className="relative" ref={profileMenuRef}>
-              <div className="flex items-center cursor-pointer group p-1" onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}>
-                <div className="w-10 h-10 bg-white/90 backdrop-blur-md rounded-full overflow-hidden border border-white/80 flex items-center justify-center shadow-md">
-                  {ownerInfo.avatar ? (
-                    <img src={ownerInfo.avatar} alt="Profile" className="w-full h-full object-cover" />
-                  ) : (
-                    <span className="font-bold text-[#1a2b3c]">{ownerInfo.name.charAt(0)}</span>
-                  )}
-                </div>
+              <div className="w-10 h-10 md:w-11 md:h-11 bg-white/90 rounded-full overflow-hidden border border-white/80 flex items-center justify-center shadow-md cursor-pointer" onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}>
+                {ownerInfo.avatar ? (
+                  <img src={ownerInfo.avatar} alt="Profile" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="font-bold text-[#1a2b3c] text-base">{ownerInfo.name.charAt(0)}</span>
+                )}
               </div>
-
               {isProfileMenuOpen && (
                 <div className="absolute right-0 mt-3 w-56 bg-white/95 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/80 py-2 z-[100]">
                   <div className="px-4 py-2 border-b border-gray-100">
@@ -292,27 +295,27 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6">
-          {/* Header Action Bar */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 pt-6">
+          {/* Header Action Bar with Time Range Filter */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-black text-[#1a2b3c]">Hello, {ownerInfo.name}</h1>
-              <p className="text-xs text-gray-500">Live Tool Room production overview</p>
+              <h1 className="text-2xl md:text-3xl font-black text-[#1a2b3c] tracking-tight">Hello, {ownerInfo.name}</h1>
+              <p className="text-xs md:text-sm text-gray-500 font-medium">Live Tool Room production overview</p>
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <Link href="/dashboard/orders" className="px-4 py-2.5 bg-[#1a2b3c] hover:bg-[#253d54] text-white text-xs font-bold rounded-2xl flex items-center gap-2 shadow-md transition-all">
-                <ClipboardList className="w-3.5 h-3.5" />
+            <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
+              <Link href="/dashboard/orders" className="px-4 py-2.5 bg-[#1a2b3c] hover:bg-[#253d54] text-white text-xs md:text-sm font-bold rounded-2xl flex items-center gap-2 shadow-md transition-all">
+                <ClipboardList className="w-4 h-4" />
                 <span>View Orders</span>
               </Link>
-              <Link href="/dashboard/new-order" className="px-4 py-2.5 bg-[#3db2a8] hover:bg-[#359d94] text-white text-xs font-bold rounded-2xl flex items-center gap-2 shadow-md transition-all">
-                <PlusCircle className="w-3.5 h-3.5" />
+              <Link href="/dashboard/new-order" className="px-4 py-2.5 bg-[#3db2a8] hover:bg-[#359d94] text-white text-xs md:text-sm font-bold rounded-2xl flex items-center gap-2 shadow-md transition-all">
+                <PlusCircle className="w-4 h-4" />
                 <span>+ New Order</span>
               </Link>
               <div className="relative">
                 <select
                   value={timeRange}
                   onChange={(e) => setTimeRange(e.target.value)}
-                  className="appearance-none bg-white/70 hover:bg-white border border-white/80 px-4 py-2.5 pr-8 rounded-2xl text-xs font-bold text-[#1a2b3c] shadow-sm focus:outline-none cursor-pointer"
+                  className="appearance-none bg-white/80 hover:bg-white border border-gray-200 px-4 py-2.5 pr-8 rounded-2xl text-xs md:text-sm font-bold text-[#1a2b3c] shadow-xs focus:outline-none cursor-pointer"
                 >
                   <option>This Week</option>
                   <option>This Month</option>
@@ -325,57 +328,72 @@ export default function DashboardPage() {
           </div>
 
           {/* 5 Live Stat Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4">
-            <div className="bg-white/40 backdrop-blur-2xl p-5 rounded-[1.75rem] border border-white/60 shadow-sm flex flex-col justify-between">
-              <span className="text-3xl font-black text-[#3db2a8]">{loading ? '...' : stats.totalJobs}</span>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">TOTAL JOBS</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 md:gap-4">
+            <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs flex flex-col justify-between min-w-0">
+              <span className="text-2xl md:text-3xl font-black text-[#3db2a8] truncate">{loading ? '...' : stats.totalJobs}</span>
+              <span className="text-xs md:text-sm font-bold text-gray-500 uppercase tracking-wider mt-1 block truncate">TOTAL JOBS</span>
             </div>
-            <div className="bg-white/40 backdrop-blur-2xl p-5 rounded-[1.75rem] border border-white/60 shadow-sm flex flex-col justify-between">
-              <span className="text-3xl font-black text-amber-500">{loading ? '...' : stats.pending}</span>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">PENDING</p>
+
+            <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs flex flex-col justify-between min-w-0">
+              <span className="text-2xl md:text-3xl font-black text-amber-500 truncate">{loading ? '...' : stats.pending}</span>
+              <span className="text-xs md:text-sm font-bold text-gray-500 uppercase tracking-wider mt-1 block truncate">PENDING</span>
             </div>
-            <div className="bg-white/40 backdrop-blur-2xl p-5 rounded-[1.75rem] border border-white/60 shadow-sm flex flex-col justify-between">
-              <span className="text-3xl font-black text-blue-500">{loading ? '...' : stats.inProduction}</span>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">IN-PRODUCTION</p>
+
+            <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs flex flex-col justify-between min-w-0">
+              <span className="text-2xl md:text-3xl font-black text-blue-500 truncate">{loading ? '...' : stats.inProduction}</span>
+              <span className="text-xs md:text-sm font-bold text-gray-500 uppercase tracking-wider mt-1 block truncate">IN-PRODUCTION</span>
             </div>
-            <div className="bg-white/40 backdrop-blur-2xl p-5 rounded-[1.75rem] border border-white/60 shadow-sm flex flex-col justify-between">
-              <span className="text-3xl font-black text-emerald-500">{loading ? '...' : stats.completed}</span>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">COMPLETED</p>
+
+            <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs flex flex-col justify-between min-w-0">
+              <span className="text-2xl md:text-3xl font-black text-emerald-500 truncate">{loading ? '...' : stats.completed}</span>
+              <span className="text-xs md:text-sm font-bold text-gray-500 uppercase tracking-wider mt-1 block truncate">COMPLETED</span>
             </div>
-            <div className="bg-white/40 backdrop-blur-2xl p-5 rounded-[1.75rem] border border-white/60 shadow-sm flex flex-col justify-between col-span-2 md:col-span-1">
-              <span className="text-3xl font-black text-[#1a2b3c]">{loading ? '...' : stats.customers}</span>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">CUSTOMERS</p>
+
+            <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs flex flex-col justify-between min-w-0 col-span-2 sm:col-span-1">
+              <span className="text-2xl md:text-3xl font-black text-purple-600 truncate">{loading ? '...' : stats.delivered}</span>
+              <span className="text-xs md:text-sm font-bold text-gray-500 uppercase tracking-wider mt-1 block truncate">DELIVERED</span>
             </div>
           </div>
 
           {/* Recent Job Cards Table */}
-          <div className="bg-white/40 backdrop-blur-2xl rounded-[2rem] border border-white/60 shadow-sm p-6 md:p-8 space-y-4">
-            <div className="flex justify-between items-center pb-3 border-b border-gray-200/40">
-              <h2 className="text-sm font-extrabold text-[#1a2b3c]">Recent Job Cards ({timeRange})</h2>
-              <Link href="/dashboard/orders" className="text-xs font-bold text-[#3db2a8] hover:underline">View All Orders →</Link>
+          <div className="bg-white/50 backdrop-blur-2xl rounded-[2rem] border border-white/70 shadow-xs overflow-hidden">
+            <div className="p-5 md:p-6 border-b border-gray-100 flex items-center justify-between">
+              <h2 className="text-base md:text-lg font-black text-[#1a2b3c]">Recent Job Cards ({timeRange})</h2>
+              <Link href="/dashboard/orders" className="text-xs md:text-sm font-bold text-[#3db2a8] hover:underline flex items-center gap-1">
+                View All Orders <ArrowUpRight className="w-4 h-4" />
+              </Link>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="text-[10px] uppercase font-bold text-gray-400 border-b border-gray-100">
+
+            <div className="overflow-x-auto w-full">
+              <table className="w-full text-left text-xs md:text-sm min-w-[650px]">
+                <thead className="text-[11px] md:text-xs uppercase font-bold text-gray-400 bg-white/40 border-b border-gray-100">
                   <tr>
-                    <th className="py-3 px-4">Order ID</th>
-                    <th className="py-3 px-4">Customer Name</th>
-                    <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4">Model / Material</th>
-                    <th className="py-3 px-4 text-right">Price</th>
+                    <th className="py-3.5 px-5">Order ID</th>
+                    <th className="py-3.5 px-5">Customer Name</th>
+                    <th className="py-3.5 px-5">Status</th>
+                    <th className="py-3.5 px-5">Model / Material</th>
+                    <th className="py-3.5 px-5 text-right">Price</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/40">
-                  {recentJobs.length === 0 ? (
-                    <tr><td colSpan="5" className="text-center py-6 text-gray-400">No job cards found for {timeRange}.</td></tr>
+                <tbody className="divide-y divide-white/60 font-medium">
+                  {loading ? (
+                    <tr><td colSpan="5" className="text-center py-8 text-gray-400">Loading recent job cards...</td></tr>
+                  ) : recentJobs.length === 0 ? (
+                    <tr><td colSpan="5" className="text-center py-8 text-gray-400">No job cards found for {timeRange}.</td></tr>
                   ) : (
-                    recentJobs.map((job) => (
-                      <tr key={job.id} className="hover:bg-white/30 transition-colors">
-                        <td className="py-3.5 px-4 font-bold text-[#3db2a8]">#{job.id}</td>
-                        <td className="py-3.5 px-4 font-bold text-[#1a2b3c]">{job.customers?.name || 'Customer Deleted'}</td>
-                        <td className="py-3.5 px-4"><span className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold ${getStatusBadge(job.status)}`}>{job.status}</span></td>
-                        <td className="py-3.5 px-4 text-gray-600 font-semibold">{job.model || '—'}</td>
-                        <td className="py-3.5 px-4 font-bold text-gray-800 text-right">{job.gear_price ? `₹${Number(job.gear_price).toLocaleString('en-IN')}` : '—'}</td>
+                    recentJobs.map(job => (
+                      <tr key={job.id} className="hover:bg-white/40 transition">
+                        <td className="py-4 px-5 font-bold text-[#3db2a8]">#{job.id}</td>
+                        <td className="py-4 px-5 font-bold text-[#1a2b3c]">{job.customers?.name || 'Customer Deleted'}</td>
+                        <td className="py-4 px-5">
+                          <span className={`px-3 py-1 rounded-full text-xs font-bold ${getStatusBadge(job.status)}`}>
+                            {job.status}
+                          </span>
+                        </td>
+                        <td className="py-4 px-5 text-gray-700">{job.model || 'Standard Gear'} ({job.material_grade || '—'})</td>
+                        <td className="py-4 px-5 text-right font-bold text-gray-900">
+                          {job.gear_price ? `₹${Number(job.gear_price).toLocaleString('en-IN')}` : '—'}
+                        </td>
                       </tr>
                     ))
                   )}
@@ -384,33 +402,82 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Job Growth Summary */}
-          <div className="bg-white/40 backdrop-blur-2xl rounded-[2rem] border border-white/60 shadow-sm p-6 flex flex-col md:flex-row items-center justify-around gap-4 text-center">
-            <div className="flex items-center gap-3">
-              <span className="text-2xl">👥</span>
-              <div className="text-left">
-                <span className="text-xs font-bold text-[#1a2b3c] block">Job Growth</span>
-                <span className="text-[10px] text-gray-400 font-medium">Period: {timeRange}</span>
+          {/* Master Pulse */}
+          <div className="bg-white/50 backdrop-blur-2xl rounded-[2.25rem] border border-white/70 shadow-xs p-6 md:p-8 flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="flex items-center gap-4 w-full md:w-1/4 justify-center md:justify-start">
+              <div className="w-12 h-12 rounded-2xl bg-[#3db2a8]/15 border border-[#3db2a8]/25 flex items-center justify-center text-[#3db2a8] shadow-xs">
+                <Activity className="w-6 h-6 text-[#3db2a8]" />
+              </div>
+              <div>
+                <span className="text-sm md:text-base font-black text-[#1a2b3c] block tracking-tight">Workshop Pulse</span>
+                <span className="text-[11px] md:text-xs text-gray-400 font-bold uppercase tracking-wider">{timeRange} Performance</span>
               </div>
             </div>
-            <div>
-              <div className="flex items-center justify-center gap-1.5">
-                <span className="text-xl font-extrabold text-[#3db2a8]">{stats.totalJobs}</span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${stats.growthPercent >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
-                  {stats.growthPercent >= 0 ? `+${stats.growthPercent}%` : `${stats.growthPercent}%`}
+
+            <div className="grid grid-cols-3 divide-x divide-gray-200/60 w-full md:w-3/4 text-center items-center">
+              {/* 1. OVERALL JOB GROWTH */}
+              <div className="px-2 sm:px-4 md:px-6">
+                <div className="flex items-center justify-center gap-2">
+                  <span className={`text-2xl sm:text-3xl md:text-4xl font-black tracking-tight ${
+                    pulseMetrics.jobGrowth.isUp ? 'text-emerald-500' : 'text-rose-500'
+                  }`}>
+                    {pulseMetrics.jobGrowth.count}
+                  </span>
+                  <div className={`flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-black shadow-xs ${
+                    pulseMetrics.jobGrowth.isUp 
+                      ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' 
+                      : 'bg-rose-50 text-rose-600 border border-rose-200'
+                  }`}>
+                    {pulseMetrics.jobGrowth.isUp ? (
+                      <ArrowUp className="w-3 h-3 text-emerald-600 stroke-[3]" />
+                    ) : (
+                      <ArrowDown className="w-3 h-3 text-rose-600 stroke-[3]" />
+                    )}
+                    <span>{Math.abs(pulseMetrics.jobGrowth.percent)}%</span>
+                  </div>
+                </div>
+                <span className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest mt-1 block">
+                  OVERALL JOB GROWTH
                 </span>
               </div>
-              <p className="text-[10px] font-bold text-gray-400 uppercase mt-0.5">Total Generated</p>
-            </div>
-            <div>
-              <span className="text-xl font-extrabold text-blue-600">{stats.inProduction}</span>
-              <p className="text-[10px] font-bold text-gray-400 uppercase mt-0.5">In Production</p>
-            </div>
-            <div>
-              <span className="text-xl font-extrabold text-emerald-600">{stats.completed}</span>
-              <p className="text-[10px] font-bold text-gray-400 uppercase mt-0.5">Completed</p>
+
+              {/* 2. TOTAL OUTPUT */}
+              <div className="px-2 sm:px-4 md:px-6">
+                <span className="text-2xl sm:text-3xl md:text-4xl font-black text-[#3db2a8] tracking-tight block">
+                  {pulseMetrics.totalOutputPcs} <span className="text-base md:text-lg font-bold text-[#3db2a8]">Pcs</span>
+                </span>
+                <span className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest mt-1 block">
+                  TOTAL OUTPUT
+                </span>
+              </div>
+
+              {/* 3. SHOP EFFICIENCY */}
+              <div className="px-2 sm:px-4 md:px-6">
+                <div className="flex items-center justify-center gap-2">
+                  <span className={`text-2xl sm:text-3xl md:text-4xl font-black tracking-tight ${
+                    pulseMetrics.efficiency.isUp ? 'text-emerald-500' : 'text-rose-500'
+                  }`}>
+                    {pulseMetrics.efficiency.percent}%
+                  </span>
+                  <div className={`flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-black shadow-xs ${
+                    pulseMetrics.efficiency.isUp 
+                      ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' 
+                      : 'bg-rose-50 text-rose-600 border border-rose-200'
+                  }`}>
+                    {pulseMetrics.efficiency.isUp ? (
+                      <ArrowUp className="w-3 h-3 text-emerald-600 stroke-[3]" />
+                    ) : (
+                      <ArrowDown className="w-3 h-3 text-rose-600 stroke-[3]" />
+                    )}
+                  </div>
+                </div>
+                <span className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest mt-1 block">
+                  SHOP EFFICIENCY
+                </span>
+              </div>
             </div>
           </div>
+
         </main>
       </div>
     </div>

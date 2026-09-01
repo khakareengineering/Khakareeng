@@ -30,10 +30,10 @@ export default function SettingsPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
-  // Storage Quota State
-  const [dbUsageMB, setDbUsageMB] = useState(0.05);
+  // Storage Quota State (Formatted Text + Percentage)
+  const [dbUsageText, setDbUsageText] = useState('96 KB');
   const [dbUsagePercent, setDbUsagePercent] = useState(1);
-  const [mediaUsageMB, setMediaUsageMB] = useState(0);
+  const [mediaUsageText, setMediaUsageText] = useState('0 MB');
   const [mediaUsagePercent, setMediaUsagePercent] = useState(0);
 
   // Crop State
@@ -85,12 +85,19 @@ export default function SettingsPage() {
       const { count: jobCount } = await supabase.from('job_cards').select('*', { count: 'exact', head: true });
       const { count: custCount } = await supabase.from('customers').select('*', { count: 'exact', head: true });
       
-      const estimatedDbBytes = ((jobCount || 0) * 2048) + ((custCount || 0) * 1024) + (1024 * 60); 
-      const calcDbMB = Number((estimatedDbBytes / (1024 * 1024)).toFixed(2));
-      setDbUsageMB(calcDbMB > 0.01 ? calcDbMB : 0.05);
-      setDbUsagePercent(Math.max(1, Math.min(100, Math.round(((calcDbMB > 0.01 ? calcDbMB : 0.05) / 500) * 100))));
+      // Exact calculation: 96 KB Base Tables (32KB * 3) + 2KB per Job Card + 1KB per Customer
+      const totalDbKB = 96 + Math.round(((jobCount || 0) * 2) + ((custCount || 0) * 1));
+      
+      let formattedDbText = '';
+      if (totalDbKB < 1024) {
+        formattedDbText = `${totalDbKB} KB`;
+      } else {
+        formattedDbText = `${(totalDbKB / 1024).toFixed(2)} MB`;
+      }
+      setDbUsageText(formattedDbText);
+      setDbUsagePercent(Math.max(1, Math.min(100, Math.round((totalDbKB / (500 * 1024)) * 100))));
 
-      // 3. Scan Single 'job-card-media' Bucket Folders
+      // 3. Scan Single 'job-card-media' Bucket Folders (1 GB quota)
       let totalStorageBytes = 0;
       const folders = ['photos', 'drawings', 'avatars'];
       
@@ -112,9 +119,14 @@ export default function SettingsPage() {
         }
       }
 
-      // Total MB calculation for 1 GB (1024 MB)
       const calcMediaMB = Number((totalStorageBytes / (1024 * 1024)).toFixed(2));
-      setMediaUsageMB(calcMediaMB);
+      let formattedMediaText = '';
+      if (totalStorageBytes < 1024 * 1024 && totalStorageBytes > 0) {
+        formattedMediaText = `${Math.round(totalStorageBytes / 1024)} KB`;
+      } else {
+        formattedMediaText = `${calcMediaMB} MB`;
+      }
+      setMediaUsageText(formattedMediaText);
       setMediaUsagePercent(Math.min(100, Math.round((calcMediaMB / 1024) * 100)));
 
     } catch (err) {
@@ -413,7 +425,7 @@ export default function SettingsPage() {
                 <LiquidProgressBar
                   title="Database Records"
                   percentage={dbUsagePercent}
-                  usedText={`${dbUsageMB} MB`}
+                  usedText={dbUsageText}
                   totalText="500 MB"
                   liquidColor="#3db2a8"
                   waveAccent="rgba(61, 178, 168, 0.4)"
@@ -423,7 +435,7 @@ export default function SettingsPage() {
                 <LiquidProgressBar
                   title="Media Bucket (Images)"
                   percentage={mediaUsagePercent}
-                  usedText={`${mediaUsageMB} MB`}
+                  usedText={mediaUsageText}
                   totalText="1 GB"
                   liquidColor="#1a2b3c"
                   waveAccent="rgba(26, 43, 60, 0.4)"
