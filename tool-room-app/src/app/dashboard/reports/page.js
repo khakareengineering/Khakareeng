@@ -9,10 +9,11 @@ import {
   UserPlus, 
   Users, 
   BarChart3, 
-  Settings, 
   LogOut,
   Sparkles,
-  Filter,
+  Search,
+  ChevronLeft,
+  ChevronRight,
   Menu,
   X
 } from 'lucide-react';
@@ -20,12 +21,19 @@ import {
 export default function ReportsPage() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedStatus, setSelectedStatus] = useState('All');
+
   const [orders, setOrders] = useState([]);
   const [filteredOrders, setFilteredOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
-  // Owner & Header state
+  // Pagination state (15 records per A4 sheet format)
+  const [currentPage, setCurrentPage] = useState(1);
+  const recordsPerPage = 15;
+
+  // Header & menu state
   const [ownerInfo, setOwnerInfo] = useState({ name: 'Owner', avatar: '' });
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -42,10 +50,12 @@ export default function ReportsPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Fetch ALL records (Bypassing 1,000 Supabase API default limit via Chunk Range)
   const fetchReportData = async () => {
     try {
       setLoading(true);
 
+      // 1. Fetch Owner Profile
       const { data: settingsData } = await supabase
         .from('app_settings')
         .select('owner_name, avatar_url')
@@ -59,17 +69,53 @@ export default function ReportsPage() {
         });
       }
 
-      const { data, error } = await supabase
+      // 2. Exact Count to know total chunks
+      const { count: totalCount, error: countErr } = await supabase
         .from('job_cards')
-        .select(`
-          *,
-          customers ( id, name, city, contact_no )
-        `)
-        .order('id', { ascending: false });
+        .select('*', { count: 'exact', head: true });
 
-      if (error) throw error;
-      setOrders(data || []);
-      setFilteredOrders(data || []);
+      if (countErr) throw countErr;
+
+      const total = totalCount || 0;
+      const chunkSize = 1000;
+      const totalChunks = Math.ceil(total / chunkSize);
+
+      // 3. Parallel Chunk Requests to fetch all 10k records quickly
+      const chunkPromises = [];
+      for (let i = 0; i < totalChunks; i++) {
+        const from = i * chunkSize;
+        const to = from + chunkSize - 1;
+        chunkPromises.push(
+          supabase
+            .from('job_cards')
+            .select(`
+              id,
+              order_date,
+              status,
+              model,
+              qty,
+              od,
+              nt,
+              gear_price,
+              tc_amt,
+              material_grade,
+              customers ( id, name, city, contact_no )
+            `)
+            .order('id', { ascending: false })
+            .range(from, to)
+        );
+      }
+
+      const results = await Promise.all(chunkPromises);
+      let allRecords = [];
+      results.forEach(res => {
+        if (res.data) {
+          allRecords = allRecords.concat(res.data);
+        }
+      });
+
+      setOrders(allRecords);
+      setFilteredOrders(allRecords);
     } catch (err) {
       console.error('Error fetching reports data:', err);
     } finally {
@@ -77,29 +123,55 @@ export default function ReportsPage() {
     }
   };
 
-  const handleFilter = (e) => {
-    e.preventDefault();
-    if (!fromDate && !toDate) {
-      setFilteredOrders(orders);
-      return;
+  // Realtime Filter Trigger
+  useEffect(() => {
+    applyAllFilters(fromDate, toDate, searchQuery, selectedStatus);
+    setCurrentPage(1); // Reset to page 1 on filter/search change
+  }, [fromDate, toDate, searchQuery, selectedStatus, orders]);
+
+  const applyAllFilters = (from, to, search, status) => {
+    let result = [...orders];
+
+    // 1. Date Filter
+    if (from && to) {
+      result = result.filter(o => (o.order_date || '') >= from && (o.order_date || '') <= to);
+    } else if (from) {
+      result = result.filter(o => (o.order_date || '') >= from);
+    } else if (to) {
+      result = result.filter(o => (o.order_date || '') <= to);
     }
 
-    const filtered = orders.filter((o) => {
-      const orderDate = o.order_date;
-      if (!orderDate) return false;
-      if (fromDate && toDate) return orderDate >= fromDate && orderDate <= toDate;
-      if (fromDate) return orderDate >= fromDate;
-      if (toDate) return orderDate <= toDate;
-      return true;
-    });
+    // 2. Status Filter
+    if (status !== 'All') {
+      result = result.filter(o => o.status === status);
+    }
 
-    setFilteredOrders(filtered);
+    // 3. Search Filter (Customer Name, Order ID, Model, Material)
+    if (search.trim()) {
+      const q = search.toLowerCase().trim();
+      result = result.filter(o => {
+        const idMatch = String(o.id).toLowerCase().includes(q);
+        const custMatch = (o.customers?.name || '').toLowerCase().includes(q);
+        const modelMatch = (o.model || '').toLowerCase().includes(q);
+        const gradeMatch = (o.material_grade || '').toLowerCase().includes(q);
+        return idMatch || custMatch || modelMatch || gradeMatch;
+      });
+    }
+
+    setFilteredOrders(result);
+  };
+
+  const handleResetFilters = () => {
+    setFromDate('');
+    setToDate('');
+    setSearchQuery('');
+    setSelectedStatus('All');
+    setFilteredOrders(orders);
+    setCurrentPage(1);
   };
 
   const handleExportPdf = () => {
     setIsGeneratingPdf(true);
-    
-    // Set document title strictly to "Report" so the downloaded PDF is named "Report.pdf"
     const originalTitle = document.title;
     document.title = "Report";
 
@@ -107,18 +179,25 @@ export default function ReportsPage() {
       setIsGeneratingPdf(false);
       setTimeout(() => {
         window.print();
-        // Restore title after print dialog closes
         document.title = originalTitle;
       }, 150);
     }, 1500);
   };
 
-  // Calculations for Screen View
+  // Metrics for all matching records
   const totalOrders = filteredOrders.length;
   const totalQty = filteredOrders.reduce((sum, o) => sum + (parseInt(o.qty) || 1), 0);
   const totalGearAmt = filteredOrders.reduce((sum, o) => sum + (parseFloat(o.gear_price) || 0), 0);
   const totalTcAmt = filteredOrders.reduce((sum, o) => sum + (parseFloat(o.tc_amt) || 0), 0);
   const grandTotal = totalGearAmt + totalTcAmt;
+
+  // Pagination Slice
+  const totalPages = Math.ceil(totalOrders / recordsPerPage) || 1;
+  const indexOfLastRecord = currentPage * recordsPerPage;
+  const indexOfFirstRecord = indexOfLastRecord - recordsPerPage;
+  const currentRecords = filteredOrders.slice(indexOfFirstRecord, indexOfLastRecord);
+
+  const statusOptions = ['All', 'Pending', 'In-Production', 'Completed', 'Delivered'];
 
   const getStatusBadge = (status) => {
     switch (status) {
@@ -132,12 +211,12 @@ export default function ReportsPage() {
   return (
     <div className="flex h-screen bg-[#f0f4f8] font-sans text-gray-800 antialiased overflow-hidden relative print:h-auto print:overflow-visible print:bg-white">
       
-      {/* Print Specific CSS Optimization */}
+      {/* Print Specific CSS */}
       <style jsx global>{`
         @media print {
           @page {
             size: A4 portrait;
-            margin: 12mm 10mm;
+            margin: 10mm;
           }
           body {
             background: white !important;
@@ -147,11 +226,11 @@ export default function ReportsPage() {
           }
           .print-table th, .print-table td {
             border: 1px solid #cbd5e1 !important;
-            padding: 8px 10px !important;
+            padding: 6px 8px !important;
           }
         }
 
-        /* Uiverse AI Loader CSS Styles */
+        /* AI Loader Styles */
         .loader-wrapper {
           position: relative;
           display: flex;
@@ -183,31 +262,21 @@ export default function ReportsPage() {
         @keyframes loader-rotate {
           0% {
             transform: rotate(90deg);
-            box-shadow:
-              0 10px 20px 0 #fff inset,
-              0 20px 30px 0 #ad5fff inset,
-              0 60px 60px 0 #471eec inset;
+            box-shadow: 0 10px 20px 0 #fff inset, 0 20px 30px 0 #ad5fff inset, 0 60px 60px 0 #471eec inset;
           }
           50% {
             transform: rotate(270deg);
-            box-shadow:
-              0 10px 20px 0 #fff inset,
-              0 20px 10px 0 #d60a47 inset,
-              0 40px 60px 0 #311e80 inset;
+            box-shadow: 0 10px 20px 0 #fff inset, 0 20px 10px 0 #d60a47 inset, 0 40px 60px 0 #311e80 inset;
           }
           100% {
             transform: rotate(450deg);
-            box-shadow:
-              0 10px 20px 0 #fff inset,
-              0 20px 30px 0 #ad5fff inset,
-              0 60px 60px 0 #471eec inset;
+            box-shadow: 0 10px 20px 0 #fff inset, 0 20px 30px 0 #ad5fff inset, 0 60px 60px 0 #471eec inset;
           }
         }
 
         .loader-letter {
           display: inline-block;
           opacity: 0.4;
-          transform: translateY(0);
           animation: loader-letter-anim 2s infinite;
           z-index: 1;
           text-shadow: 0 2px 8px rgba(0,0,0,0.6);
@@ -228,22 +297,13 @@ export default function ReportsPage() {
         .loader-letter:nth-child(13) { animation-delay: 1.2s; }
 
         @keyframes loader-letter-anim {
-          0%, 100% {
-            opacity: 0.4;
-            transform: translateY(0);
-          }
-          20% {
-            opacity: 1;
-            transform: scale(1.18);
-          }
-          40% {
-            opacity: 0.7;
-            transform: translateY(0);
-          }
+          0%, 100% { opacity: 0.4; transform: translateY(0); }
+          20% { opacity: 1; transform: scale(1.18); }
+          40% { opacity: 0.7; transform: translateY(0); }
         }
       `}</style>
 
-      {/* Decorative Blur Orbs */}
+      {/* Decorative Orbs */}
       <div className="print:hidden absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-[#3db2a8]/20 rounded-full blur-[80px] z-0 pointer-events-none"></div>
       <div className="print:hidden absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] bg-[#1a2b3c]/10 rounded-full blur-[100px] z-0 pointer-events-none"></div>
 
@@ -251,11 +311,17 @@ export default function ReportsPage() {
         <div className="fixed inset-0 bg-[#1a2b3c]/30 backdrop-blur-xs z-40 lg:hidden print:hidden" onClick={() => setIsMobileMenuOpen(false)}></div>
       )}
 
-      {/* Sidebar (Hidden on Print) */}
+      {/* Sidebar */}
       <aside className={`print:hidden fixed inset-y-0 left-0 w-[260px] bg-white/40 backdrop-blur-2xl border-r border-white/60 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-50 transform transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0 flex flex-col ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="h-20 flex items-center justify-between px-8">
-          <span className="text-xl font-black text-[#1a2b3c] tracking-wider">RA-XIS<span className="text-[#3db2a8]">.</span></span>
-          <button className="lg:hidden text-gray-500 hover:text-[#3db2a8]" onClick={() => setIsMobileMenuOpen(false)}>
+        <div className="h-28 flex items-center justify-between px-5 border-b border-white/40">
+          <Link href="/dashboard" className="flex items-center justify-center w-full">
+            <img 
+              src="/logo.png" 
+              alt="Khakare Engineering Logo" 
+              className="h-20 w-auto max-w-[210px] object-contain drop-shadow-md hover:scale-105 transition-transform duration-300" 
+            />
+          </Link>
+          <button className="lg:hidden text-gray-500 hover:text-[#3db2a8] ml-2" onClick={() => setIsMobileMenuOpen(false)}>
             <X className="w-6 h-6" />
           </button>
         </div>
@@ -299,7 +365,7 @@ export default function ReportsPage() {
       {/* Main Container */}
       <div className="flex-1 flex flex-col overflow-hidden w-full z-10 relative print:overflow-visible">
         
-        {/* Web Header (Hidden on Print) */}
+        {/* Header */}
         <header className="print:hidden h-20 bg-white/30 backdrop-blur-xl border-b border-white/50 flex items-center justify-between px-4 md:px-8 relative z-50 shrink-0">
           <div className="flex items-center gap-3">
             <button className="lg:hidden p-2 text-gray-600 hover:bg-white/50 rounded-xl" onClick={() => setIsMobileMenuOpen(true)}>
@@ -322,8 +388,8 @@ export default function ReportsPage() {
           </div>
         </header>
 
-        {/* PRINT ONLY: Clean Professional Header */}
-        <div className="hidden print:block mb-6 border-b-2 border-gray-800 pb-4">
+        {/* PRINT ONLY: Clean Letterhead Header */}
+        <div className="hidden print:block mb-4 border-b-2 border-gray-800 pb-3">
           <div className="flex justify-between items-start">
             <div>
               <h1 className="text-2xl font-black text-gray-900 tracking-tight">KHAKARE ENGINEERING</h1>
@@ -333,18 +399,23 @@ export default function ReportsPage() {
             <div className="text-right">
               <span className="text-xs font-bold px-3 py-1 bg-gray-100 rounded border border-gray-300">PRODUCTION REPORT</span>
               <p className="text-[10px] text-gray-500 mt-1">Generated: {new Date().toLocaleDateString('en-GB')}</p>
-              <p className="text-[10px] text-gray-500">Period: {fromDate ? `${fromDate} to ${toDate || 'Till Date'}` : 'All Records'}</p>
+              <p className="text-[10px] text-gray-500">Page: {currentPage} of {totalPages}</p>
+              {(searchQuery || selectedStatus !== 'All') && (
+                <p className="text-[10px] font-bold text-teal-700 mt-0.5">
+                  Filtered: {searchQuery ? `"${searchQuery}" ` : ''}{selectedStatus !== 'All' ? `[Status: ${selectedStatus}]` : ''}
+                </p>
+              )}
             </div>
           </div>
         </div>
 
         <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 pt-6 print:p-0 print:overflow-visible">
           
-          {/* Web Title & Glowing Export Button */}
+          {/* Action Bar */}
           <div className="print:hidden flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h1 className="text-2xl md:text-3xl font-black text-[#1a2b3c]">Date-wise Reports</h1>
-              <p className="text-xs md:text-sm text-gray-500">Generate and export production summaries based on dates.</p>
+              <p className="text-xs md:text-sm text-gray-500">Complete database production statements with page controls.</p>
             </div>
 
             <button
@@ -357,8 +428,8 @@ export default function ReportsPage() {
             </button>
           </div>
 
-          {/* Date Filter Box (Hidden on Print) */}
-          <form onSubmit={handleFilter} className="print:hidden bg-white/50 backdrop-blur-2xl p-5 rounded-3xl border border-white/70 shadow-xs flex flex-col md:flex-row items-end gap-4">
+          {/* Date Filter Box */}
+          <div className="print:hidden bg-white/50 backdrop-blur-2xl p-5 rounded-3xl border border-white/70 shadow-xs flex flex-col md:flex-row items-end gap-4">
             <div className="w-full md:w-1/3">
               <label className="text-[11px] md:text-xs font-bold text-gray-500 uppercase block mb-1">From Date</label>
               <input
@@ -379,77 +450,112 @@ export default function ReportsPage() {
             </div>
             <div className="flex gap-2 w-full md:w-auto">
               <button
-                type="submit"
-                className="flex-1 md:flex-none px-6 py-2.5 bg-[#3db2a8] hover:bg-[#359d94] active:scale-95 text-white text-xs md:text-sm font-bold rounded-xl shadow-md flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-              >
-                <Filter className="w-4 h-4" />
-                <span>Filter Report</span>
-              </button>
-              <button
                 type="button"
-                onClick={() => { setFromDate(''); setToDate(''); setFilteredOrders(orders); }}
-                className="px-5 py-2.5 bg-white/80 hover:bg-white active:scale-95 text-gray-600 text-xs md:text-sm font-bold rounded-xl border border-gray-200 transition-all cursor-pointer"
+                onClick={handleResetFilters}
+                className="px-6 py-2.5 bg-white/80 hover:bg-white active:scale-95 text-gray-600 text-xs md:text-sm font-bold rounded-xl border border-gray-200 shadow-xs transition-all cursor-pointer"
               >
                 Reset
               </button>
             </div>
-          </form>
+          </div>
 
-          {/* Summary Stat Cards (Visible ONLY on Screen, Completely HIDDEN in Print / PDF) */}
+          {/* Summary Stat Cards (Full Database Exact Sums) */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 md:gap-4 print:hidden">
             <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs min-w-0">
-              <span className="text-xl sm:text-2xl md:text-3xl font-black text-[#1a2b3c] block truncate">{totalOrders}</span>
+              <span className="text-xl sm:text-2xl md:text-3xl font-black text-[#1a2b3c] block truncate">
+                {loading ? '...' : totalOrders.toLocaleString('en-IN')}
+              </span>
               <p className="text-[11px] md:text-xs font-bold text-gray-400 uppercase mt-1">TOTAL ORDERS</p>
             </div>
             <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs min-w-0">
-              <span className="text-xl sm:text-2xl md:text-3xl font-black text-blue-600 block truncate">{totalQty} Pcs</span>
+              <span className="text-xl sm:text-2xl md:text-3xl font-black text-blue-600 block truncate">
+                {loading ? '...' : `${totalQty.toLocaleString('en-IN')} Pcs`}
+              </span>
               <p className="text-[11px] md:text-xs font-bold text-gray-400 uppercase mt-1">TOTAL OUTPUT</p>
             </div>
             <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs min-w-0">
-              <span className="text-xl sm:text-2xl md:text-3xl font-black text-[#3db2a8] block truncate">₹{totalGearAmt.toLocaleString('en-IN')}</span>
+              <span className="text-xl sm:text-2xl md:text-3xl font-black text-[#3db2a8] block truncate">
+                {loading ? '...' : `₹${totalGearAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`}
+              </span>
               <p className="text-[11px] md:text-xs font-bold text-gray-400 uppercase mt-1">GEAR AMOUNT</p>
             </div>
             <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs min-w-0">
-              <span className="text-xl sm:text-2xl md:text-3xl font-black text-emerald-600 block truncate">₹{grandTotal.toLocaleString('en-IN')}</span>
+              <span className="text-xl sm:text-2xl md:text-3xl font-black text-emerald-600 block truncate">
+                {loading ? '...' : `₹${grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`}
+              </span>
               <p className="text-[11px] md:text-xs font-bold text-gray-400 uppercase mt-1">GRAND TOTAL</p>
             </div>
           </div>
 
-          {/* Table Container - Clean Engineering Grid */}
+          {/* Search Bar & Status Tabs */}
+          <div className="print:hidden bg-white/50 backdrop-blur-2xl p-4 rounded-[2rem] border border-white/70 shadow-xs flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="relative w-full md:w-80">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Search by Order ID, Customer Name, Model..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-white/90 border border-gray-200/80 rounded-2xl pl-10 pr-4 py-2.5 text-xs md:text-sm text-gray-700 placeholder-gray-400 font-medium focus:outline-none focus:border-[#3db2a8] shadow-xs"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0 scrollbar-none">
+              {statusOptions.map((status) => {
+                const isActive = selectedStatus === status;
+                return (
+                  <button
+                    key={status}
+                    type="button"
+                    onClick={() => setSelectedStatus(status)}
+                    className={`px-4 py-2 rounded-2xl text-xs md:text-sm font-bold transition-all duration-200 cursor-pointer whitespace-nowrap ${
+                      isActive
+                        ? 'bg-[#1a2b3c] text-white shadow-md'
+                        : 'bg-white/60 hover:bg-white text-gray-600 hover:text-[#1a2b3c] border border-white/80'
+                    }`}
+                  >
+                    {status}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Table Container - Clean Engineering Grid (A4 Sheet Ready: 15 records) */}
           <div className="bg-white/50 backdrop-blur-2xl rounded-[2rem] border border-white/70 shadow-xs overflow-hidden print:bg-white print:rounded-none print:border-none print:shadow-none">
             <div className="overflow-x-auto w-full">
-              <table className="w-full text-left text-xs md:text-sm min-w-[700px] print:min-w-full print:text-[11px] print-table">
+              <table className="w-full text-left text-xs md:text-sm min-w-[700px] print:min-w-full print:text-[10px] print-table">
                 <thead className="text-[11px] md:text-xs uppercase font-bold text-gray-500 bg-white/40 border-b border-gray-200 print:bg-gray-100 print:text-gray-900">
                   <tr>
-                    <th className="py-3.5 px-3">Date</th>
-                    <th className="py-3.5 px-3">Job ID</th>
-                    <th className="py-3.5 px-3">Customer Name</th>
-                    <th className="py-3.5 px-3">Model / Specs</th>
-                    <th className="py-3.5 px-3 text-center">Qty</th>
-                    <th className="py-3.5 px-3 text-right">Gear Price</th>
-                    <th className="py-3.5 px-3 text-right">TC Amt</th>
-                    <th className="py-3.5 px-3 text-center">Status</th>
+                    <th className="py-3 px-3">Date</th>
+                    <th className="py-3 px-3">Job ID</th>
+                    <th className="py-3 px-3">Customer Name</th>
+                    <th className="py-3 px-3">Model / Specs</th>
+                    <th className="py-3 px-3 text-center">Qty</th>
+                    <th className="py-3 px-3 text-right">Gear Price</th>
+                    <th className="py-3 px-3 text-right">TC Amt</th>
+                    <th className="py-3 px-3 text-center">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/60 font-medium print:divide-gray-300">
                   {loading ? (
-                    <tr><td colSpan="8" className="text-center py-10 text-gray-400">Loading reports data...</td></tr>
-                  ) : filteredOrders.length === 0 ? (
-                    <tr><td colSpan="8" className="text-center py-10 text-gray-400">No records found for selected period.</td></tr>
+                    <tr><td colSpan="8" className="text-center py-10 text-gray-400">Loading complete database records...</td></tr>
+                  ) : currentRecords.length === 0 ? (
+                    <tr><td colSpan="8" className="text-center py-10 text-gray-400">No records found matching current criteria.</td></tr>
                   ) : (
-                    filteredOrders.map(o => (
+                    currentRecords.map(o => (
                       <tr key={o.id} className="hover:bg-white/40 transition">
-                        <td className="py-3 px-3 text-gray-600">{o.order_date || '—'}</td>
-                        <td className="py-3 px-3 font-bold text-[#3db2a8] print:text-gray-900">#{o.id}</td>
-                        <td className="py-3 px-3 font-bold text-[#1a2b3c] print:text-gray-900">{o.customers?.name || 'Customer Deleted'}</td>
-                        <td className="py-3 px-3 text-gray-700">
+                        <td className="py-2.5 px-3 text-gray-600">{o.order_date || '—'}</td>
+                        <td className="py-2.5 px-3 font-bold text-[#3db2a8] print:text-gray-900">#{o.id}</td>
+                        <td className="py-2.5 px-3 font-bold text-[#1a2b3c] print:text-gray-900">{o.customers?.name || 'Customer Deleted'}</td>
+                        <td className="py-2.5 px-3 text-gray-700">
                           {o.model || 'Standard'} (OD: {o.od || '—'}, NT: {o.nt || '—'})
                         </td>
-                        <td className="py-3 px-3 text-center font-bold text-teal-700 print:text-gray-900">{o.qty || 1}</td>
-                        <td className="py-3 px-3 text-right font-bold text-gray-900">₹{Number(o.gear_price || 0).toLocaleString('en-IN')}</td>
-                        <td className="py-3 px-3 text-right text-gray-600">₹{Number(o.tc_amt || 0).toLocaleString('en-IN')}</td>
-                        <td className="py-3 px-3 text-center">
-                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold print:border print:px-2 print:py-0.5 ${getStatusBadge(o.status)}`}>
+                        <td className="py-2.5 px-3 text-center font-bold text-teal-700 print:text-gray-900">{o.qty || 1}</td>
+                        <td className="py-2.5 px-3 text-right font-bold text-gray-900">₹{Number(o.gear_price || 0).toLocaleString('en-IN')}</td>
+                        <td className="py-2.5 px-3 text-right text-gray-600">₹{Number(o.tc_amt || 0).toLocaleString('en-IN')}</td>
+                        <td className="py-2.5 px-3 text-center">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold print:border print:px-1.5 print:py-0 ${getStatusBadge(o.status)}`}>
                             {o.status}
                           </span>
                         </td>
@@ -459,13 +565,46 @@ export default function ReportsPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination Controls Bar (Hidden on Print) */}
+            <div className="print:hidden p-4 border-t border-gray-100/80 flex flex-col sm:flex-row items-center justify-between gap-3 bg-white/30">
+              <span className="text-xs md:text-sm font-semibold text-gray-500">
+                Showing <strong className="text-gray-800">{totalOrders > 0 ? indexOfFirstRecord + 1 : 0}</strong> to <strong className="text-gray-800">{Math.min(indexOfLastRecord, totalOrders)}</strong> of <strong className="text-[#3db2a8]">{totalOrders.toLocaleString('en-IN')}</strong> records
+              </span>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1 || loading}
+                  className="px-3 py-1.5 rounded-xl border border-gray-200 bg-white/80 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed font-bold text-xs flex items-center gap-1 shadow-xs transition"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span>Previous</span>
+                </button>
+
+                <div className="flex items-center gap-1 px-2">
+                  <span className="text-xs font-bold text-[#1a2b3c]">Page {currentPage}</span>
+                  <span className="text-xs text-gray-400">/ {totalPages}</span>
+                </div>
+
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages || loading}
+                  className="px-3 py-1.5 rounded-xl border border-gray-200 bg-white/80 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed font-bold text-xs flex items-center gap-1 shadow-xs transition"
+                >
+                  <span>Next</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
           </div>
 
-          {/* PRINT ONLY: Professional Footer & Authorized Sign */}
-          <div className="hidden print:flex justify-between items-end pt-12 mt-8 border-t border-gray-300 text-xs">
+          {/* PRINT ONLY: Footer */}
+          <div className="hidden print:flex justify-between items-end pt-8 mt-6 border-t border-gray-300 text-xs">
             <div>
               <p className="font-bold text-gray-800">KHAKARE ENGINEERING</p>
-              <p className="text-[10px] text-gray-500">This is a computer-generated production summary report.</p>
+              <p className="text-[10px] text-gray-500">A4 Production Statement - Page {currentPage} of {totalPages}</p>
             </div>
             <div className="text-center">
               <div className="w-44 border-b border-gray-400 mb-1"></div>
@@ -476,7 +615,7 @@ export default function ReportsPage() {
         </main>
       </div>
 
-      {/* FULL-SCREEN EXACT UIVERSE AI ORB MODAL */}
+      {/* AI ORB MODAL */}
       {isGeneratingPdf && (
         <div className="print:hidden fixed inset-0 bg-[#070d1e]/80 backdrop-blur-md z-[9999] flex flex-col items-center justify-center p-4 pointer-events-none">
           <div className="loader-wrapper">

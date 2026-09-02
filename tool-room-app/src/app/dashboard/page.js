@@ -32,7 +32,7 @@ export default function DashboardPage() {
     delivered: 0
   });
   
-  // Custom 3-Pillar Metrics: Overall Job Growth, Total Output (Pcs), Shop Efficiency (%)
+  // 3-Pillar Metrics: Overall Job Growth, Total Output (Pcs), Shop Efficiency (%)
   const [pulseMetrics, setPulseMetrics] = useState({
     jobGrowth: { count: 0, percent: 0, isUp: true },
     totalOutputPcs: 0,
@@ -61,31 +61,56 @@ export default function DashboardPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Format Date in Local Timezone YYYY-MM-DD (Avoids UTC offset issues)
+  const formatLocalDate = (d) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const getDateFilterThresholds = (range) => {
     const now = new Date();
-    let currentStart = new Date();
-    let prevStart = new Date();
+    let currentStart = new Date(now);
+    let prevStart = new Date(now);
+    let prevEnd = new Date(now);
 
     if (range === 'This Week') {
-      const day = now.getDay() || 7;
-      currentStart.setDate(now.getDate() - day + 1);
+      // Monday of current week
+      const currentDay = now.getDay(); // 0 is Sunday, 1 is Monday...
+      const diffToMonday = currentDay === 0 ? 6 : currentDay - 1;
+      currentStart.setDate(now.getDate() - diffToMonday);
       currentStart.setHours(0, 0, 0, 0);
+
+      // Previous week same range
       prevStart = new Date(currentStart);
       prevStart.setDate(prevStart.getDate() - 7);
+      prevEnd = new Date(currentStart);
     } else if (range === 'This Month') {
+      // 1st day of current month
       currentStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+      // Previous month 1st day to end
       prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      prevEnd = new Date(now.getFullYear(), now.getMonth(), 1);
     } else if (range === 'This Year') {
+      // 1st day of current year
       currentStart = new Date(now.getFullYear(), 0, 1);
+
+      // Previous year
       prevStart = new Date(now.getFullYear() - 1, 0, 1);
+      prevEnd = new Date(now.getFullYear(), 0, 1);
     } else {
+      // All Time
       currentStart = new Date('1970-01-01');
       prevStart = new Date('1970-01-01');
+      prevEnd = new Date('1970-01-01');
     }
 
     return {
-      currentStr: currentStart.toISOString().split('T')[0],
-      prevStr: prevStart.toISOString().split('T')[0]
+      currentStr: formatLocalDate(currentStart),
+      prevStr: formatLocalDate(prevStart),
+      prevEndStr: formatLocalDate(prevEnd)
     };
   };
 
@@ -93,7 +118,7 @@ export default function DashboardPage() {
     try {
       setLoading(true);
 
-      // 1. Fetch Owner Settings
+      // 1. Fetch Owner Profile Info
       const { data: settingsData } = await supabase
         .from('app_settings')
         .select('owner_name, avatar_url')
@@ -107,13 +132,16 @@ export default function DashboardPage() {
         });
       }
 
-      const { currentStr, prevStr } = getDateFilterThresholds(selectedRange);
+      const { currentStr, prevStr, prevEndStr } = getDateFilterThresholds(selectedRange);
 
-      // 2. Exact Counts for 5 Stat Cards (Bypasses Supabase 1,000 row default limit)
-      const buildCountQuery = () => {
+      // 2. Exact Count queries matching the strict date range
+      const buildQuery = (status = null) => {
         let q = supabase.from('job_cards').select('*', { count: 'exact', head: true });
         if (selectedRange !== 'All Time') {
           q = q.gte('order_date', currentStr);
+        }
+        if (status) {
+          q = q.eq('status', status);
         }
         return q;
       };
@@ -126,24 +154,24 @@ export default function DashboardPage() {
         { count: deliveredCount },
         { count: prevTotalCount }
       ] = await Promise.all([
-        buildCountQuery(),
-        buildCountQuery().eq('status', 'Pending'),
-        buildCountQuery().eq('status', 'In-Production'),
-        buildCountQuery().eq('status', 'Completed'),
-        buildCountQuery().eq('status', 'Delivered'),
+        buildQuery(),
+        buildQuery('Pending'),
+        buildQuery('In-Production'),
+        buildQuery('Completed'),
+        buildQuery('Delivered'),
         selectedRange !== 'All Time'
           ? supabase
               .from('job_cards')
               .select('*', { count: 'exact', head: true })
               .gte('order_date', prevStr)
-              .lt('order_date', currentStr)
+              .lt('order_date', prevEndStr)
           : Promise.resolve({ count: 0 })
       ]);
 
       const totalJobs = totalCount || 0;
       const finishedJobs = (completedCount || 0) + (deliveredCount || 0);
 
-      // 3. Overall Job Growth Calculation
+      // 3. Growth Percentage
       const prevJobs = prevTotalCount || 0;
       let jobGrowthPercent = 0;
       let jobGrowthIsUp = true;
@@ -156,18 +184,21 @@ export default function DashboardPage() {
         jobGrowthIsUp = true;
       }
 
-      // 4. Shop Efficiency Calculation
+      // 4. Shop Efficiency
       const efficiencyPct = totalJobs > 0 ? Math.round((finishedJobs / totalJobs) * 100) : 0;
       const efficiencyIsUp = totalJobs > 0 && finishedJobs > 0 && efficiencyPct >= 50;
 
-      // 5. Total Output (Pcs) & Recent 5 Jobs
-      let qtyQuery = supabase.from('job_cards').select('qty');
+      // 5. Total Output Pcs calculation (Optimized fetch)
+      let pcsQuery = supabase.from('job_cards').select('qty');
       if (selectedRange !== 'All Time') {
-        qtyQuery = qtyQuery.gte('order_date', currentStr);
+        pcsQuery = pcsQuery.gte('order_date', currentStr);
       }
-      const { data: qtyData } = await qtyQuery;
+      pcsQuery = pcsQuery.limit(10000); // Ensures all 10k items are covered without truncation
+
+      const { data: qtyData } = await pcsQuery;
       const totalPcs = (qtyData || []).reduce((sum, j) => sum + (parseInt(j.qty) || 1), 0);
 
+      // 6. Recent 5 Job Cards for the table view
       let recentQuery = supabase
         .from('job_cards')
         .select(`
@@ -193,7 +224,7 @@ export default function DashboardPage() {
 
       setRecentJobs(recentData || []);
 
-      // 6. Set Final State
+      // 7. Update Dashboard States
       setStats({
         totalJobs: totalJobs,
         pending: pendingCount || 0,
@@ -233,7 +264,7 @@ export default function DashboardPage() {
         <div className="fixed inset-0 bg-[#1a2b3c]/30 backdrop-blur-xs z-40 lg:hidden" onClick={() => setIsMobileMenuOpen(false)}></div>
       )}
 
-      {/* Sidebar with Large Prominent Brand Logo */}
+      {/* Sidebar */}
       <aside className={`fixed inset-y-0 left-0 w-[260px] bg-white/40 backdrop-blur-2xl border-r border-white/60 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-50 transform transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0 flex flex-col ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         
         {/* Prominent High-Visibility Brand Logo Area */}
