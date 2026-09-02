@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { 
@@ -22,19 +22,19 @@ export default function ReportsPage() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedStatus, setSelectedStatus] = useState('All');
+  const [selectedStatus, setSelectedStatus] = useState('Pending');
 
   const [orders, setOrders] = useState([]);
-  const [filteredOrders, setFilteredOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-  const [isPrintingAll, setIsPrintingAll] = useState(false);
 
-  // Screen display: Exactly 22 records per view
+  // Screen View: 25 records per view
   const [currentPage, setCurrentPage] = useState(1);
-  const recordsPerPage = 22;
+  const screenRecordsPerPage = 25;
 
-  // Header state
+  // Print View: Exactly 45 records fills 100% of an A4 sheet
+  const printRecordsPerPage = 45;
+
   const [ownerInfo, setOwnerInfo] = useState({ name: 'Owner', avatar: '' });
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -51,7 +51,6 @@ export default function ReportsPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Fetch complete database records in parallel chunks
   const fetchReportData = async () => {
     try {
       setLoading(true);
@@ -96,9 +95,9 @@ export default function ReportsPage() {
               nt,
               gear_price,
               tc_amt,
-              material_grade,
-              customers ( id, name, city, contact_no )
+              customers ( name )
             `)
+            .order('order_date', { ascending: false })
             .order('id', { ascending: false })
             .range(from, to)
         );
@@ -112,8 +111,15 @@ export default function ReportsPage() {
         }
       });
 
+      // Strict Latest to Oldest Sorting
+      allRecords.sort((a, b) => {
+        const dateA = new Date(a.order_date || '1970-01-01').getTime();
+        const dateB = new Date(b.order_date || '1970-01-01').getTime();
+        if (dateB !== dateA) return dateB - dateA;
+        return Number(b.id) - Number(a.id);
+      });
+
       setOrders(allRecords);
-      setFilteredOrders(allRecords);
     } catch (err) {
       console.error('Error fetching reports data:', err);
     } finally {
@@ -121,86 +127,108 @@ export default function ReportsPage() {
     }
   };
 
-  useEffect(() => {
-    applyAllFilters(fromDate, toDate, searchQuery, selectedStatus);
-    setCurrentPage(1);
-  }, [fromDate, toDate, searchQuery, selectedStatus, orders]);
+  const filteredOrders = useMemo(() => {
+    let result = orders;
 
-  const applyAllFilters = (from, to, search, status) => {
-    let result = [...orders];
-
-    if (from && to) {
-      result = result.filter(o => (o.order_date || '') >= from && (o.order_date || '') <= to);
-    } else if (from) {
-      result = result.filter(o => (o.order_date || '') >= from);
-    } else if (to) {
-      result = result.filter(o => (o.order_date || '') <= to);
+    if (selectedStatus !== 'All') {
+      result = result.filter(o => o.status === selectedStatus);
     }
 
-    if (status !== 'All') {
-      result = result.filter(o => o.status === status);
+    if (fromDate && toDate) {
+      result = result.filter(o => (o.order_date || '') >= fromDate && (o.order_date || '') <= toDate);
+    } else if (fromDate) {
+      result = result.filter(o => (o.order_date || '') >= fromDate);
+    } else if (toDate) {
+      result = result.filter(o => (o.order_date || '') <= toDate);
     }
 
-    if (search.trim()) {
-      const q = search.toLowerCase().trim();
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
       result = result.filter(o => {
-        const idMatch = String(o.id).toLowerCase().includes(q);
+        const idMatch = String(o.id).includes(q);
         const custMatch = (o.customers?.name || '').toLowerCase().includes(q);
         const modelMatch = (o.model || '').toLowerCase().includes(q);
-        const gradeMatch = (o.material_grade || '').toLowerCase().includes(q);
-        return idMatch || custMatch || modelMatch || gradeMatch;
+        return idMatch || custMatch || modelMatch;
       });
     }
 
-    setFilteredOrders(result);
-  };
+    // Latest to Oldest Sort on Filtered Array
+    return [...result].sort((a, b) => {
+      const dateA = new Date(a.order_date || '1970-01-01').getTime();
+      const dateB = new Date(b.order_date || '1970-01-01').getTime();
+      if (dateB !== dateA) return dateB - dateA;
+      return Number(b.id) - Number(a.id);
+    });
+  }, [orders, selectedStatus, fromDate, toDate, searchQuery]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedStatus, fromDate, toDate, searchQuery]);
 
   const handleResetFilters = () => {
     setFromDate('');
     setToDate('');
     setSearchQuery('');
-    setSelectedStatus('All');
-    setFilteredOrders(orders);
+    setSelectedStatus('Pending');
     setCurrentPage(1);
   };
 
-  // Full Database Print Engine
+  // Export PDF with Dynamic File Name: Report_DD-MM-YYYY
   const handleExportPdf = () => {
     setIsGeneratingPdf(true);
-    setIsPrintingAll(true);
     const originalTitle = document.title;
-    document.title = "Report";
+
+    const today = new Date();
+    const day = String(today.getDate()).padStart(2, '0');
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const year = today.getFullYear();
+    const dynamicFileName = `Report_${day}-${month}-${year}`;
+
+    // Sets default PDF download file name
+    document.title = dynamicFileName;
 
     setTimeout(() => {
       setIsGeneratingPdf(false);
       setTimeout(() => {
         window.print();
         document.title = originalTitle;
-        setIsPrintingAll(false);
-      }, 300);
+      }, 150);
     }, 1200);
   };
 
   const totalOrders = filteredOrders.length;
-  const totalQty = filteredOrders.reduce((sum, o) => sum + (parseInt(o.qty) || 1), 0);
-  const totalGearAmt = filteredOrders.reduce((sum, o) => sum + (parseFloat(o.gear_price) || 0), 0);
-  const totalTcAmt = filteredOrders.reduce((sum, o) => sum + (parseFloat(o.tc_amt) || 0), 0);
+  const { totalQty, totalGearAmt, totalTcAmt } = useMemo(() => {
+    let qty = 0;
+    let gear = 0;
+    let tc = 0;
+    for (let i = 0; i < filteredOrders.length; i++) {
+      const o = filteredOrders[i];
+      qty += (parseInt(o.qty) || 1);
+      gear += (parseFloat(o.gear_price) || 0);
+      tc += (parseFloat(o.tc_amt) || 0);
+    }
+    return { totalQty: qty, totalGearAmt: gear, totalTcAmt: tc };
+  }, [filteredOrders]);
+
   const grandTotal = totalGearAmt + totalTcAmt;
 
-  // Screen pagination (22 records)
-  const totalPages = Math.ceil(totalOrders / recordsPerPage) || 1;
-  const indexOfLastRecord = currentPage * recordsPerPage;
-  const indexOfFirstRecord = indexOfLastRecord - recordsPerPage;
+  // Screen View Slice (25 per page)
+  const totalPages = Math.ceil(totalOrders / screenRecordsPerPage) || 1;
+  const indexOfLastRecord = currentPage * screenRecordsPerPage;
+  const indexOfFirstRecord = indexOfLastRecord - screenRecordsPerPage;
   const screenRecords = filteredOrders.slice(indexOfFirstRecord, indexOfLastRecord);
 
-  // Group ALL Filtered orders into clean 22-record chunks for print pages
-  const printChunks = [];
-  for (let i = 0; i < filteredOrders.length; i += recordsPerPage) {
-    printChunks.push(filteredOrders.slice(i, i + recordsPerPage));
-  }
-  const totalPrintPages = printChunks.length || 1;
+  // Print Chunks (45 records per A4 page)
+  const printChunks = useMemo(() => {
+    const chunks = [];
+    for (let i = 0; i < filteredOrders.length; i += printRecordsPerPage) {
+      chunks.push(filteredOrders.slice(i, i + printRecordsPerPage));
+    }
+    return chunks;
+  }, [filteredOrders]);
 
-  const statusOptions = ['All', 'Pending', 'In-Production', 'Completed', 'Delivered'];
+  const totalPrintPages = printChunks.length || 1;
+  const statusOptions = ['Pending', 'In-Production', 'Completed', 'Delivered', 'All'];
 
   const getStatusBadge = (status) => {
     switch (status) {
@@ -212,14 +240,14 @@ export default function ReportsPage() {
   };
 
   return (
-    <div className={`flex min-h-screen bg-[#f0f4f8] font-sans text-gray-800 antialiased ${isPrintingAll ? '!h-auto !overflow-visible !bg-white' : 'h-screen overflow-hidden'}`}>
+    <div className="flex h-screen bg-[#f0f4f8] font-sans text-gray-800 antialiased overflow-hidden relative print:h-auto print:overflow-visible print:bg-white print:block">
       
-      {/* Strict Print CSS for Pure Multi-page output */}
+      {/* Precision Print Styling */}
       <style jsx global>{`
         @media print {
           @page {
             size: A4 portrait;
-            margin: 8mm 10mm;
+            margin: 6mm 8mm 8mm 8mm;
           }
           html, body {
             height: auto !important;
@@ -235,7 +263,8 @@ export default function ReportsPage() {
           .print-sheet {
             page-break-after: always !important;
             break-after: page !important;
-            min-height: 98vh;
+            box-sizing: border-box;
+            min-height: 280mm;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
@@ -243,18 +272,20 @@ export default function ReportsPage() {
           .print-sheet:last-child {
             page-break-after: auto !important;
             break-after: auto !important;
+            min-height: 0;
           }
           .print-table th {
-            border: 1px solid #64748b !important;
-            padding: 4px 6px !important;
-            font-size: 9.5px !important;
+            border: 1px solid #475569 !important;
+            padding: 3.5px 5px !important;
+            font-size: 8.5px !important;
             background-color: #f1f5f9 !important;
+            text-transform: uppercase;
           }
           .print-table td {
             border: 1px solid #cbd5e1 !important;
-            padding: 3px 6px !important;
-            font-size: 9px !important;
-            line-height: 1.2 !important;
+            padding: 3.8px 5px !important;
+            font-size: 8.5px !important;
+            line-height: 1.15 !important;
           }
         }
 
@@ -287,18 +318,9 @@ export default function ReportsPage() {
         }
 
         @keyframes loader-rotate {
-          0% {
-            transform: rotate(90deg);
-            box-shadow: 0 10px 20px 0 #fff inset, 0 20px 30px 0 #ad5fff inset, 0 60px 60px 0 #471eec inset;
-          }
-          50% {
-            transform: rotate(270deg);
-            box-shadow: 0 10px 20px 0 #fff inset, 0 20px 10px 0 #d60a47 inset, 0 40px 60px 0 #311e80 inset;
-          }
-          100% {
-            transform: rotate(450deg);
-            box-shadow: 0 10px 20px 0 #fff inset, 0 20px 30px 0 #ad5fff inset, 0 60px 60px 0 #471eec inset;
-          }
+          0% { transform: rotate(90deg); box-shadow: 0 10px 20px 0 #fff inset, 0 20px 30px 0 #ad5fff inset, 0 60px 60px 0 #471eec inset; }
+          50% { transform: rotate(270deg); box-shadow: 0 10px 20px 0 #fff inset, 0 20px 10px 0 #d60a47 inset, 0 40px 60px 0 #311e80 inset; }
+          100% { transform: rotate(450deg); box-shadow: 0 10px 20px 0 #fff inset, 0 20px 30px 0 #ad5fff inset, 0 60px 60px 0 #471eec inset; }
         }
 
         .loader-letter {
@@ -330,26 +352,23 @@ export default function ReportsPage() {
         }
       `}</style>
 
-      {/* ========================================================================= */}
-      {/* 1. PRINT SECTION (RENDERED TO PRINT ALL 5,060+ FILTERED RECORDS)         */}
-      {/* ========================================================================= */}
+      {/* 1. PRINT SECTION */}
       <div className="hidden print:block w-full">
         {printChunks.map((chunk, pageIndex) => (
           <div key={pageIndex} className="print-sheet">
             <div>
-              {/* Header on Every Page */}
-              <div className="border-b-2 border-gray-800 pb-2 mb-2 flex justify-between items-start">
+              <div className="border-b-2 border-gray-800 pb-1 mb-1.5 flex justify-between items-start">
                 <div>
-                  <h1 className="text-xl font-black text-gray-900 tracking-tight leading-none">KHAKARE ENGINEERING</h1>
-                  <p className="text-[10px] text-gray-600 mt-1">Specialists in Gear Hobbing, Milling, Shaping & Precision Works</p>
-                  <p className="text-[9px] text-gray-500">Jalna, Maharashtra</p>
+                  <h1 className="text-base font-black text-gray-900 tracking-tight leading-none">KHAKARE ENGINEERING</h1>
+                  <p className="text-[9.5px] text-gray-600 mt-0.5">Specialists in Gear Hobbing, Milling, Shaping & Precision Works</p>
+                  <p className="text-[8px] text-gray-500">Jalna, Maharashtra</p>
                 </div>
                 <div className="text-right">
-                  <span className="text-[10px] font-bold px-2.5 py-0.5 bg-gray-100 rounded border border-gray-300">PRODUCTION REPORT</span>
-                  <p className="text-[8.5px] text-gray-500 mt-1">Generated: {new Date().toLocaleDateString('en-GB')}</p>
-                  <p className="text-[9px] font-bold text-gray-900">Page {pageIndex + 1} of {totalPrintPages}</p>
+                  <span className="text-[9px] font-bold px-2 py-0.5 bg-gray-100 rounded border border-gray-300">PRODUCTION REPORT</span>
+                  <p className="text-[7.5px] text-gray-500 mt-0.5">Date: {new Date().toLocaleDateString('en-GB')}</p>
+                  <p className="text-[8px] font-bold text-gray-900">Page {pageIndex + 1} of {totalPrintPages}</p>
                   {(searchQuery || selectedStatus !== 'All' || fromDate || toDate) && (
-                    <p className="text-[8.5px] font-bold text-teal-700 mt-0.5">
+                    <p className="text-[7.5px] font-bold text-teal-700 mt-0.5">
                       {selectedStatus !== 'All' ? `[Status: ${selectedStatus}] ` : ''}
                       {searchQuery ? `"${searchQuery}" ` : ''}
                       {fromDate ? `(${fromDate} to ${toDate || 'Now'})` : ''}
@@ -358,16 +377,15 @@ export default function ReportsPage() {
                 </div>
               </div>
 
-              {/* Exactly 22 Records per Page Table */}
               <table className="w-full text-left print-table">
                 <thead>
                   <tr>
                     <th className="w-[11%]">Date</th>
                     <th className="w-[8%]">Job ID</th>
                     <th className="w-[20%]">Customer Name</th>
-                    <th className="w-[25%]">Model / Specs</th>
+                    <th className="w-[26%]">Model / Specs</th>
                     <th className="w-[6%] text-center">Qty</th>
-                    <th className="w-[12%] text-right">Gear Price</th>
+                    <th className="w-[11%] text-right">Gear Price</th>
                     <th className="w-[9%] text-right">TC Amt</th>
                     <th className="w-[9%] text-center">Status</th>
                   </tr>
@@ -389,24 +407,21 @@ export default function ReportsPage() {
               </table>
             </div>
 
-            {/* Clean Footer with Signature immediately below the 22nd row */}
-            <div className="flex justify-between items-end pt-2 mt-2 border-t border-gray-300 text-xs">
+            <div className="flex justify-between items-end pt-2 mt-1 border-t border-gray-300 text-xs">
               <div>
-                <p className="font-bold text-gray-800 text-[10px]">KHAKARE ENGINEERING</p>
-                <p className="text-[8.5px] text-gray-500">Page {pageIndex + 1} of {totalPrintPages} • Total Filtered Records: {totalOrders.toLocaleString('en-IN')}</p>
+                <p className="font-bold text-gray-800 text-[9px]">KHAKARE ENGINEERING</p>
+                <p className="text-[7.5px] text-gray-500">Page {pageIndex + 1} of {totalPrintPages} • Filtered Records: {totalOrders.toLocaleString('en-IN')}</p>
               </div>
               <div className="text-center">
                 <div className="w-36 border-b border-gray-400 mb-1"></div>
-                <p className="font-bold text-gray-700 text-[10px]">Authorized Signature</p>
+                <p className="font-bold text-gray-700 text-[9px]">Authorized Signature</p>
               </div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* ========================================================================= */}
-      {/* 2. REGULAR WEB VIEW (SCREEN ONLY)                                         */}
-      {/* ========================================================================= */}
+      {/* 2. REGULAR WEB VIEW */}
       <div className="web-only flex h-screen w-full overflow-hidden relative">
         <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-[#3db2a8]/20 rounded-full blur-[80px] z-0 pointer-events-none"></div>
         <div className="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] bg-[#1a2b3c]/10 rounded-full blur-[100px] z-0 pointer-events-none"></div>
@@ -415,7 +430,6 @@ export default function ReportsPage() {
           <div className="fixed inset-0 bg-[#1a2b3c]/30 backdrop-blur-xs z-40 lg:hidden" onClick={() => setIsMobileMenuOpen(false)}></div>
         )}
 
-        {/* Sidebar */}
         <aside className={`fixed inset-y-0 left-0 w-[260px] bg-white/40 backdrop-blur-2xl border-r border-white/60 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-50 transform transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0 flex flex-col ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
           <div className="h-28 flex items-center justify-between px-5 border-b border-white/40">
             <Link href="/dashboard" className="flex items-center justify-center w-full">
@@ -466,7 +480,6 @@ export default function ReportsPage() {
           </div>
         </aside>
 
-        {/* Main Content Area */}
         <div className="flex-1 flex flex-col overflow-hidden w-full z-10 relative">
           
           <header className="h-20 bg-white/30 backdrop-blur-xl border-b border-white/50 flex items-center justify-between px-4 md:px-8 relative z-50 shrink-0">
@@ -493,11 +506,10 @@ export default function ReportsPage() {
 
           <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 pt-6">
             
-            {/* Header Action Bar */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h1 className="text-2xl md:text-3xl font-black text-[#1a2b3c]">Date-wise Reports</h1>
-                <p className="text-xs md:text-sm text-gray-500">Complete database production statements with 22 records per view.</p>
+                <p className="text-xs md:text-sm text-gray-500">Sorted from latest to oldest • Showing 25 records per view.</p>
               </div>
 
               <button
@@ -603,7 +615,7 @@ export default function ReportsPage() {
               </div>
             </div>
 
-            {/* Table Container - Exact 22 records on screen */}
+            {/* Table Container */}
             <div className="bg-white/50 backdrop-blur-2xl rounded-[2rem] border border-white/70 shadow-xs overflow-hidden">
               <div className="overflow-x-auto w-full">
                 <table className="w-full text-left text-xs md:text-sm min-w-[700px]">
@@ -627,7 +639,7 @@ export default function ReportsPage() {
                     ) : (
                       screenRecords.map(o => (
                         <tr key={o.id} className="hover:bg-white/40 transition">
-                          <td className="py-2.5 px-4 text-gray-600">{o.order_date || '—'}</td>
+                          <td className="py-2.5 px-4 font-semibold text-gray-700">{o.order_date || '—'}</td>
                           <td className="py-2.5 px-4 font-bold text-[#3db2a8]">#{o.id}</td>
                           <td className="py-2.5 px-4 font-bold text-[#1a2b3c]">{o.customers?.name || 'Customer Deleted'}</td>
                           <td className="py-2.5 px-4 text-gray-700">
@@ -648,7 +660,7 @@ export default function ReportsPage() {
                 </table>
               </div>
 
-              {/* Pagination Controls Bar: Showing 1 to 22 of X records */}
+              {/* Pagination Controls Bar */}
               <div className="p-4 border-t border-gray-100/80 flex flex-col sm:flex-row items-center justify-between gap-3 bg-white/30">
                 <span className="text-xs md:text-sm font-semibold text-gray-500">
                   Showing <strong className="text-gray-800">{totalOrders > 0 ? indexOfFirstRecord + 1 : 0}</strong> to <strong className="text-gray-800">{Math.min(indexOfLastRecord, totalOrders)}</strong> of <strong className="text-[#3db2a8]">{totalOrders.toLocaleString('en-IN')}</strong> records

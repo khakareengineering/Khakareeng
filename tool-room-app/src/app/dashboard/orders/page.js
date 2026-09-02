@@ -20,7 +20,8 @@ import {
   FileText,
   Image as ImageIcon,
   X,
-  UploadCloud
+  UploadCloud,
+  Menu
 } from 'lucide-react';
 
 export default function ViewOrdersPage() {
@@ -102,7 +103,6 @@ export default function ViewOrdersPage() {
     }
   };
 
-  // Complete Order Deletion with Media Bucket Cleanup
   const handleDeleteOrder = async (orderId) => {
     const targetOrder = orders.find(o => o.id === orderId);
     if (!targetOrder) return;
@@ -110,13 +110,11 @@ export default function ViewOrdersPage() {
     if (!confirm(`Are you sure you want to delete Order #${orderId} and all associated images from storage?`)) return;
 
     try {
-      // 1. Physically delete attached media from bucket
       const allFiles = [...(targetOrder.photos || []), ...(targetOrder.drawings || [])];
       for (const fileUrl of allFiles) {
         await deleteFileFromBucket(fileUrl);
       }
 
-      // 2. Delete database record
       const { error } = await supabase
         .from('job_cards')
         .delete()
@@ -131,17 +129,14 @@ export default function ViewOrdersPage() {
     }
   };
 
-  // Single Media File Deletion (Physical + Database Array)
   const handleDeleteMedia = async (orderId, mediaType, urlToDelete) => {
     if (!confirm('Are you sure you want to permanently delete this file from storage?')) return;
     try {
       const targetOrder = orders.find(o => o.id === orderId);
       if (!targetOrder) return;
 
-      // 1. Physically delete from Supabase storage bucket
       await deleteFileFromBucket(urlToDelete);
 
-      // 2. Update PostgreSQL array
       const updatedList = (targetOrder[mediaType] || []).filter(url => url !== urlToDelete);
 
       const { error } = await supabase
@@ -161,7 +156,6 @@ export default function ViewOrdersPage() {
     }
   };
 
-  // Quick Upload Media inside Modal
   const handleQuickUpload = async (e, mediaType) => {
     const files = Array.from(e.target.files);
     if (!files.length || !viewingOrder) return;
@@ -247,105 +241,134 @@ export default function ViewOrdersPage() {
       <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-[#3db2a8]/20 rounded-full blur-[80px] z-0 pointer-events-none"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] bg-[#1a2b3c]/10 rounded-full blur-[100px] z-0 pointer-events-none"></div>
 
-      {isMobileMenuOpen && <div className="fixed inset-0 bg-[#1a2b3c]/20 backdrop-blur-sm z-40 md:hidden" onClick={() => setIsMobileMenuOpen(false)}></div>}
+      {isMobileMenuOpen && (
+        <div className="fixed inset-0 bg-[#1a2b3c]/30 backdrop-blur-xs z-40 md:hidden" onClick={() => setIsMobileMenuOpen(false)}></div>
+      )}
 
-      {/* Sidebar */}
+      {/* Sidebar with Brand Logo */}
       <aside className={`fixed inset-y-0 left-0 w-[260px] bg-white/40 backdrop-blur-2xl border-r border-white/60 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-50 transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 flex flex-col ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="h-20 flex items-center justify-between px-8">
-          <span className="text-xl font-black text-[#1a2b3c] tracking-wider">RA-XIS<span className="text-[#3db2a8]">.</span></span>
-          <button className="md:hidden text-gray-500 hover:text-[#3db2a8]" onClick={() => setIsMobileMenuOpen(false)}>
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg>
+        <div className="h-28 flex items-center justify-between px-5 border-b border-white/40">
+          <Link href="/dashboard" className="flex items-center justify-center w-full">
+            <img 
+              src="/logo.png" 
+              alt="Khakare Engineering Logo" 
+              className="h-20 w-auto max-w-[210px] object-contain drop-shadow-md hover:scale-105 transition-transform duration-300" 
+            />
+          </Link>
+          <button className="md:hidden text-gray-500 hover:text-[#3db2a8] ml-2" onClick={() => setIsMobileMenuOpen(false)}>
+            <X className="w-6 h-6" />
           </button>
         </div>
         
         <nav className="flex-1 px-5 py-4 space-y-2 overflow-y-auto">
           <Link href="/dashboard" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
-            <LayoutDashboard className="w-4 h-4 text-gray-400" />
-            Dashboard
+            <LayoutDashboard className="w-5 h-5 text-gray-400" />
+            <span className="text-sm">Dashboard</span>
           </Link>
           <Link href="/dashboard/new-order" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
-            <PlusCircle className="w-4 h-4 text-gray-400" />
-            New Order
+            <PlusCircle className="w-5 h-5 text-gray-400" />
+            <span className="text-sm">New Order</span>
           </Link>
-          <Link href="/dashboard/orders" className="flex items-center gap-3 px-4 py-3 bg-white/60 backdrop-blur-md shadow-sm border border-white/50 text-[#3db2a8] font-bold rounded-2xl relative transition-all whitespace-nowrap">
+          <Link href="/dashboard/orders" className="flex items-center gap-3 px-4 py-3 bg-white/60 backdrop-blur-md shadow-xs border border-white/50 text-[#3db2a8] font-bold rounded-2xl relative transition-all whitespace-nowrap">
             <div className="absolute left-1.5 top-2 bottom-2 w-1.5 bg-[#3db2a8] rounded-full"></div>
-            <ClipboardList className="w-4 h-4 text-[#3db2a8]" />
-            View Orders
+            <ClipboardList className="w-5 h-5 text-[#3db2a8]" />
+            <span className="text-sm">View Orders</span>
           </Link>
           <Link href="/dashboard/new-customer" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
-            <UserPlus className="w-4 h-4 text-gray-400" />
-            New Customer
+            <UserPlus className="w-5 h-5 text-gray-400" />
+            <span className="text-sm">New Customer</span>
           </Link>
           <Link href="/dashboard/customers" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
-            <Users className="w-4 h-4 text-gray-400" />
-            View Customers
+            <Users className="w-5 h-5 text-gray-400" />
+            <span className="text-sm">View Customers</span>
           </Link>
           <Link href="/dashboard/reports" className="flex items-center gap-3 px-4 py-3 text-gray-600 hover:text-[#1a2b3c] hover:bg-white/40 rounded-2xl font-semibold transition-all whitespace-nowrap">
-            <BarChart3 className="w-4 h-4 text-gray-400" />
-            Reports
+            <BarChart3 className="w-5 h-5 text-gray-400" />
+            <span className="text-sm">Reports</span>
           </Link>
         </nav>
 
         <div className="p-5 border-t border-white/40">
           <Link href="/" className="flex items-center gap-3 px-4 py-3 text-gray-400 hover:text-red-500 hover:bg-white/40 rounded-2xl font-semibold transition-colors whitespace-nowrap">
-            <LogOut className="w-4 h-4" />
-            Logout
+            <LogOut className="w-5 h-5" />
+            <span className="text-sm">Logout</span>
           </Link>
         </div>
       </aside>
 
       {/* Main Container */}
       <div className="flex-1 flex flex-col overflow-hidden w-full z-10 relative">
-        <header className="h-20 bg-white/30 backdrop-blur-xl border-b border-white/50 flex items-center justify-between px-4 md:px-8 relative z-50">
-          <span className="text-sm font-bold text-gray-500">Khakare Engineering Tool Room</span>
+        <header className="h-20 bg-white/30 backdrop-blur-xl border-b border-white/50 flex items-center justify-between px-4 md:px-8 relative z-50 shrink-0">
+          <div className="flex items-center gap-3">
+            <button className="md:hidden p-2 text-gray-600 hover:bg-white/50 rounded-xl" onClick={() => setIsMobileMenuOpen(true)}>
+              <Menu className="w-6 h-6" />
+            </button>
+            <span className="text-sm md:text-base font-extrabold text-[#1a2b3c] tracking-tight">Khakare Engineering</span>
+          </div>
+
           <div className="flex items-center gap-4">
             <div className="relative" ref={profileMenuRef}>
-              <div className="w-10 h-10 bg-white/90 rounded-full overflow-hidden border border-white/80 flex items-center justify-center shadow-md cursor-pointer" onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}>
-                {ownerInfo.avatar ? <img src={ownerInfo.avatar} alt="Profile" className="w-full h-full object-cover" /> : <span className="font-bold text-[#1a2b3c]">{ownerInfo.name.charAt(0)}</span>}
+              <div className="w-10 h-10 md:w-11 md:h-11 bg-white/90 rounded-full overflow-hidden border border-white/80 flex items-center justify-center shadow-md cursor-pointer" onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}>
+                {ownerInfo.avatar ? (
+                  <img src={ownerInfo.avatar} alt="Profile" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="font-bold text-[#1a2b3c] text-base">{ownerInfo.name.charAt(0)}</span>
+                )}
               </div>
               {isProfileMenuOpen && (
                 <div className="absolute right-0 mt-3 w-56 bg-white/95 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/80 py-2 z-[100]">
-                  <Link href="/dashboard/settings" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:text-[#3db2a8]">Settings</Link>
-                  <Link href="/" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-red-500 hover:bg-red-50">Logout</Link>
+                  <div className="px-4 py-2 border-b border-gray-100">
+                    <p className="text-xs text-gray-400 font-semibold">Logged in as</p>
+                    <p className="text-sm font-bold text-[#1a2b3c]">{ownerInfo.name}</p>
+                  </div>
+                  <Link href="/dashboard/settings" onClick={() => setIsProfileMenuOpen(false)} className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:text-[#3db2a8] hover:bg-slate-50 transition">
+                    <Settings className="w-4 h-4" />
+                    Settings
+                  </Link>
+                  <div className="border-t border-gray-100 my-1"></div>
+                  <Link href="/" className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-red-500 hover:bg-red-50 transition">
+                    <LogOut className="w-4 h-4" />
+                    Logout
+                  </Link>
                 </div>
               )}
             </div>
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6">
+        <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 pt-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-black text-[#1a2b3c]">All Orders & Job Cards</h1>
-              <p className="text-xs text-gray-500">Click any Order ID or Customer Name to view full technical specifications & images</p>
+              <h1 className="text-2xl md:text-3xl font-black text-[#1a2b3c] tracking-tight">All Orders & Job Cards</h1>
+              <p className="text-xs md:text-sm text-gray-500 font-medium">Click any Order ID or Customer Name to view full technical specifications & images</p>
             </div>
-            <Link href="/dashboard/new-order" className="px-5 py-2.5 bg-[#3db2a8] hover:bg-[#359d94] text-white text-xs font-bold rounded-2xl flex items-center gap-2 shadow-md w-fit">
+            <Link href="/dashboard/new-order" className="px-5 py-2.5 bg-[#3db2a8] hover:bg-[#359d94] text-white text-xs md:text-sm font-bold rounded-2xl flex items-center gap-2 shadow-md w-fit transition">
               <PlusCircle className="w-4 h-4" />
               <span>+ New Order</span>
             </Link>
           </div>
 
           {/* Search & Filter */}
-          <div className="bg-white/40 backdrop-blur-2xl p-4 rounded-2xl border border-white/60 shadow-sm flex flex-col md:flex-row gap-3 items-center justify-between">
+          <div className="bg-white/50 backdrop-blur-2xl p-4 rounded-2xl border border-white/70 shadow-xs flex flex-col md:flex-row gap-3 items-center justify-between">
             <div className="relative w-full md:w-96">
-              <Search className="w-4 h-4 absolute left-3 top-3 text-gray-400" />
+              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
                 placeholder="Search by Order ID, Customer Name, Model..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 bg-white/80 border border-gray-200 rounded-xl text-xs font-medium focus:outline-none focus:border-[#3db2a8]"
+                className="w-full pl-10 pr-4 py-2.5 bg-white/90 border border-gray-200 rounded-xl text-xs md:text-sm font-medium focus:outline-none focus:border-[#3db2a8]"
               />
             </div>
-            <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
+            <div className="flex items-center gap-1.5 w-full md:w-auto overflow-x-auto pb-1 md:pb-0 scrollbar-none">
               {['All', 'Pending', 'In-Production', 'Completed', 'Delivered'].map(status => (
                 <button
                   key={status}
                   onClick={() => setStatusFilter(status)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+                  className={`px-3.5 py-1.5 rounded-xl text-xs md:text-sm font-bold transition whitespace-nowrap cursor-pointer ${
                     statusFilter === status 
-                      ? 'bg-[#1a2b3c] text-white' 
-                      : 'bg-white/60 text-gray-600 hover:bg-white'
+                      ? 'bg-[#1a2b3c] text-white shadow-xs' 
+                      : 'bg-white/60 hover:bg-white text-gray-600 hover:text-[#1a2b3c] border border-white/80'
                   }`}
                 >
                   {status}
@@ -355,10 +378,10 @@ export default function ViewOrdersPage() {
           </div>
 
           {/* Orders Table */}
-          <div className="bg-white/40 backdrop-blur-2xl rounded-[2rem] border border-white/60 shadow-sm overflow-hidden">
+          <div className="bg-white/50 backdrop-blur-2xl rounded-[2rem] border border-white/70 shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="text-[10px] uppercase font-bold text-gray-400 bg-white/30 border-b border-gray-100">
+              <table className="w-full text-left text-xs md:text-sm">
+                <thead className="text-[11px] md:text-xs uppercase font-bold text-gray-400 bg-white/40 border-b border-gray-100">
                   <tr>
                     <th className="py-3.5 px-4">Order ID</th>
                     <th className="py-3.5 px-4">Customer</th>
@@ -369,14 +392,14 @@ export default function ViewOrdersPage() {
                     <th className="py-3.5 px-4 text-center">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/40">
+                <tbody className="divide-y divide-white/60 font-medium">
                   {loading ? (
                     <tr><td colSpan="7" className="text-center py-8 text-gray-400">Loading orders...</td></tr>
                   ) : filteredOrders.length === 0 ? (
                     <tr><td colSpan="7" className="text-center py-8 text-gray-400">No job cards found.</td></tr>
                   ) : (
                     filteredOrders.map(order => (
-                      <tr key={order.id} className="hover:bg-white/30 transition-colors">
+                      <tr key={order.id} className="hover:bg-white/40 transition-colors">
                         <td className="py-3.5 px-4">
                           <button 
                             onClick={() => setViewingOrder(order)}
@@ -385,7 +408,7 @@ export default function ViewOrdersPage() {
                             <span>#{order.id}</span>
                             <Eye className="w-3 h-3 opacity-60" />
                           </button>
-                          <span className="block text-[10px] text-gray-400">{order.order_date || '—'}</span>
+                          <span className="block text-[10px] md:text-xs text-gray-400">{order.order_date || '—'}</span>
                         </td>
                         <td className="py-3.5 px-4">
                           <button 
@@ -394,13 +417,13 @@ export default function ViewOrdersPage() {
                           >
                             {order.customers?.name || 'Customer Deleted'}
                           </button>
-                          <span className="text-[10px] text-gray-500">{order.customers?.contact_no || order.customers?.city || '—'}</span>
+                          <span className="text-[10px] md:text-xs text-gray-500">{order.customers?.contact_no || order.customers?.city || '—'}</span>
                         </td>
                         <td className="py-3.5 px-4">
                           <span className="font-semibold text-gray-800">{order.model || 'Standard Gear'}</span>
-                          <span className="block text-[10px] text-teal-700 font-bold">{order.qty || 1} Pcs</span>
+                          <span className="block text-[10px] md:text-xs text-teal-700 font-bold">{order.qty || 1} Pcs</span>
                         </td>
-                        <td className="py-3.5 px-4 text-[11px] text-gray-600">
+                        <td className="py-3.5 px-4 text-[11px] md:text-xs text-gray-600">
                           <div>OD: {order.od || '—'} | NT: {order.nt || '—'}</div>
                           <div>Thk: {order.thickness || '—'} | Len: {order.length || '—'}</div>
                         </td>
@@ -408,7 +431,7 @@ export default function ViewOrdersPage() {
                           <select
                             value={order.status}
                             onChange={(e) => handleStatusChange(order.id, e.target.value)}
-                            className={`px-2.5 py-1 rounded-xl text-[10px] font-bold focus:outline-none cursor-pointer ${getStatusBadge(order.status)}`}
+                            className={`px-2.5 py-1 rounded-xl text-[10px] md:text-xs font-bold focus:outline-none cursor-pointer ${getStatusBadge(order.status)}`}
                           >
                             <option value="Pending">Pending</option>
                             <option value="In-Production">In-Production</option>
@@ -418,20 +441,20 @@ export default function ViewOrdersPage() {
                         </td>
                         <td className="py-3.5 px-4 text-right">
                           <span className="font-black text-gray-900 block">{order.gear_price ? `₹${Number(order.gear_price).toLocaleString('en-IN')}` : '—'}</span>
-                          {order.tc_amt > 0 && <span className="text-[10px] text-gray-500">TC: ₹{Number(order.tc_amt).toLocaleString('en-IN')}</span>}
+                          {order.tc_amt > 0 && <span className="text-[10px] md:text-xs text-gray-500">TC: ₹{Number(order.tc_amt).toLocaleString('en-IN')}</span>}
                         </td>
                         <td className="py-3.5 px-4">
                           <div className="flex items-center justify-center gap-2">
-                            <button title="View Full Details" onClick={() => setViewingOrder(order)} className="p-1.5 bg-white/60 hover:bg-white rounded-lg text-gray-600 hover:text-[#3db2a8] transition cursor-pointer">
+                            <button title="View Full Details" onClick={() => setViewingOrder(order)} className="p-1.5 bg-white/80 hover:bg-white rounded-lg text-gray-600 hover:text-[#3db2a8] shadow-xs transition cursor-pointer">
                               <Eye className="w-3.5 h-3.5" />
                             </button>
-                            <button title="Print Workshop Tag" onClick={() => setSelectedTagOrder(order)} className="p-1.5 bg-white/60 hover:bg-white rounded-lg text-gray-600 hover:text-[#3db2a8] transition cursor-pointer">
+                            <button title="Print Workshop Tag" onClick={() => setSelectedTagOrder(order)} className="p-1.5 bg-white/80 hover:bg-white rounded-lg text-gray-600 hover:text-[#3db2a8] shadow-xs transition cursor-pointer">
                               <Printer className="w-3.5 h-3.5" />
                             </button>
-                            <button title="Edit Order" onClick={() => setEditingOrder({ ...order })} className="p-1.5 bg-white/60 hover:bg-white rounded-lg text-gray-600 hover:text-blue-600 transition cursor-pointer">
+                            <button title="Edit Order" onClick={() => setEditingOrder({ ...order })} className="p-1.5 bg-white/80 hover:bg-white rounded-lg text-gray-600 hover:text-blue-600 shadow-xs transition cursor-pointer">
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
-                            <button title="Delete Order" onClick={() => handleDeleteOrder(order.id)} className="p-1.5 bg-white/60 hover:bg-white rounded-lg text-gray-600 hover:text-red-600 transition cursor-pointer">
+                            <button title="Delete Order" onClick={() => handleDeleteOrder(order.id)} className="p-1.5 bg-white/80 hover:bg-white rounded-lg text-gray-600 hover:text-red-600 shadow-xs transition cursor-pointer">
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
@@ -458,7 +481,7 @@ export default function ViewOrdersPage() {
                     </div>
                     <p className="text-xs text-gray-500 mt-1">Order Date: {viewingOrder.order_date || '—'}</p>
                   </div>
-                  <button onClick={() => setViewingOrder(null)} className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-700">
+                  <button onClick={() => setViewingOrder(null)} className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-700 cursor-pointer">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
@@ -646,11 +669,11 @@ export default function ViewOrdersPage() {
 
                 {/* Modal Footer Actions */}
                 <div className="flex justify-between items-center pt-4 border-t border-gray-100">
-                  <button onClick={() => { setSelectedTagOrder(viewingOrder); setViewingOrder(null); }} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-gray-700 font-bold text-xs rounded-xl flex items-center gap-2">
+                  <button onClick={() => { setSelectedTagOrder(viewingOrder); setViewingOrder(null); }} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-gray-700 font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer transition">
                     <Printer className="w-3.5 h-3.5" />
                     <span>Print Workshop Tag</span>
                   </button>
-                  <button onClick={() => setViewingOrder(null)} className="px-6 py-2 bg-[#1a2b3c] text-white font-bold text-xs rounded-xl shadow-md">
+                  <button onClick={() => setViewingOrder(null)} className="px-6 py-2 bg-[#1a2b3c] text-white font-bold text-xs rounded-xl shadow-md cursor-pointer hover:bg-[#253d54] transition">
                     Close
                   </button>
                 </div>
@@ -664,51 +687,51 @@ export default function ViewOrdersPage() {
               <form onSubmit={handleSaveEdit} className="bg-white rounded-3xl p-6 md:p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto space-y-4 shadow-2xl">
                 <div className="flex justify-between items-center pb-3 border-b border-gray-100">
                   <h3 className="font-bold text-[#1a2b3c] text-sm">Edit Job Card #{editingOrder.id} ({editingOrder.customers?.name})</h3>
-                  <button type="button" onClick={() => setEditingOrder(null)} className="text-gray-400 hover:text-gray-600 font-bold">✕</button>
+                  <button type="button" onClick={() => setEditingOrder(null)} className="text-gray-400 hover:text-gray-600 font-bold cursor-pointer">✕</button>
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
                   <div>
                     <label className="font-bold text-gray-500">Gear Model</label>
-                    <input type="text" value={editingOrder.model || ''} onChange={(e) => setEditingOrder({...editingOrder, model: e.target.value})} className="w-full border rounded-xl p-2 mt-1" />
+                    <input type="text" value={editingOrder.model || ''} onChange={(e) => setEditingOrder({...editingOrder, model: e.target.value})} className="w-full border rounded-xl p-2 mt-1 focus:outline-none focus:border-[#3db2a8]" />
                   </div>
                   <div>
                     <label className="font-bold text-gray-500">Quantity</label>
-                    <input type="number" min="1" value={editingOrder.qty || 1} onChange={(e) => setEditingOrder({...editingOrder, qty: e.target.value})} className="w-full border rounded-xl p-2 mt-1" />
+                    <input type="number" min="1" value={editingOrder.qty || 1} onChange={(e) => setEditingOrder({...editingOrder, qty: e.target.value})} className="w-full border rounded-xl p-2 mt-1 focus:outline-none focus:border-[#3db2a8]" />
                   </div>
                   <div>
                     <label className="font-bold text-gray-500">OD</label>
-                    <input type="text" value={editingOrder.od || ''} onChange={(e) => setEditingOrder({...editingOrder, od: e.target.value})} className="w-full border rounded-xl p-2 mt-1" />
+                    <input type="text" value={editingOrder.od || ''} onChange={(e) => setEditingOrder({...editingOrder, od: e.target.value})} className="w-full border rounded-xl p-2 mt-1 focus:outline-none focus:border-[#3db2a8]" />
                   </div>
                   <div>
                     <label className="font-bold text-gray-500">NT</label>
-                    <input type="text" value={editingOrder.nt || ''} onChange={(e) => setEditingOrder({...editingOrder, nt: e.target.value})} className="w-full border rounded-xl p-2 mt-1" />
+                    <input type="text" value={editingOrder.nt || ''} onChange={(e) => setEditingOrder({...editingOrder, nt: e.target.value})} className="w-full border rounded-xl p-2 mt-1 focus:outline-none focus:border-[#3db2a8]" />
                   </div>
                   <div>
                     <label className="font-bold text-gray-500">Thickness</label>
-                    <input type="text" value={editingOrder.thickness || ''} onChange={(e) => setEditingOrder({...editingOrder, thickness: e.target.value})} className="w-full border rounded-xl p-2 mt-1" />
+                    <input type="text" value={editingOrder.thickness || ''} onChange={(e) => setEditingOrder({...editingOrder, thickness: e.target.value})} className="w-full border rounded-xl p-2 mt-1 focus:outline-none focus:border-[#3db2a8]" />
                   </div>
                   <div>
                     <label className="font-bold text-gray-500">Length</label>
-                    <input type="text" value={editingOrder.length || ''} onChange={(e) => setEditingOrder({...editingOrder, length: e.target.value})} className="w-full border rounded-xl p-2 mt-1" />
+                    <input type="text" value={editingOrder.length || ''} onChange={(e) => setEditingOrder({...editingOrder, length: e.target.value})} className="w-full border rounded-xl p-2 mt-1 focus:outline-none focus:border-[#3db2a8]" />
                   </div>
                   <div>
                     <label className="font-bold text-gray-500">Gear Price (₹)</label>
-                    <input type="number" value={editingOrder.gear_price || 0} onChange={(e) => setEditingOrder({...editingOrder, gear_price: e.target.value})} className="w-full border rounded-xl p-2 mt-1" />
+                    <input type="number" value={editingOrder.gear_price || 0} onChange={(e) => setEditingOrder({...editingOrder, gear_price: e.target.value})} className="w-full border rounded-xl p-2 mt-1 focus:outline-none focus:border-[#3db2a8]" />
                   </div>
                   <div>
                     <label className="font-bold text-gray-500">TC Amt (₹)</label>
-                    <input type="number" value={editingOrder.tc_amt || 0} onChange={(e) => setEditingOrder({...editingOrder, tc_amt: e.target.value})} className="w-full border rounded-xl p-2 mt-1" />
+                    <input type="number" value={editingOrder.tc_amt || 0} onChange={(e) => setEditingOrder({...editingOrder, tc_amt: e.target.value})} className="w-full border rounded-xl p-2 mt-1 focus:outline-none focus:border-[#3db2a8]" />
                   </div>
                   <div>
                     <label className="font-bold text-gray-500">Bore Keyway</label>
-                    <input type="text" value={editingOrder.bore_keyway || ''} onChange={(e) => setEditingOrder({...editingOrder, bore_keyway: e.target.value})} className="w-full border rounded-xl p-2 mt-1" />
+                    <input type="text" value={editingOrder.bore_keyway || ''} onChange={(e) => setEditingOrder({...editingOrder, bore_keyway: e.target.value})} className="w-full border rounded-xl p-2 mt-1 focus:outline-none focus:border-[#3db2a8]" />
                   </div>
                 </div>
 
                 <div className="flex justify-end gap-2 pt-3 border-t">
-                  <button type="button" onClick={() => setEditingOrder(null)} className="px-5 py-2 bg-gray-100 rounded-xl text-xs font-bold text-gray-600">Cancel</button>
-                  <button type="submit" className="px-6 py-2 bg-[#3db2a8] text-white rounded-xl text-xs font-bold shadow-md">Save Changes</button>
+                  <button type="button" onClick={() => setEditingOrder(null)} className="px-5 py-2 bg-gray-100 rounded-xl text-xs font-bold text-gray-600 cursor-pointer">Cancel</button>
+                  <button type="submit" className="px-6 py-2 bg-[#3db2a8] text-white rounded-xl text-xs font-bold shadow-md cursor-pointer hover:bg-[#359d94]">Save Changes</button>
                 </div>
               </form>
             </div>
@@ -720,7 +743,7 @@ export default function ViewOrdersPage() {
               <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
                 <div className="flex justify-between items-center pb-2 border-b">
                   <h3 className="font-bold text-[#1a2b3c] text-xs uppercase">Workshop Job Tag</h3>
-                  <button onClick={() => setSelectedTagOrder(null)} className="text-gray-400 font-bold">✕</button>
+                  <button onClick={() => setSelectedTagOrder(null)} className="text-gray-400 font-bold cursor-pointer">✕</button>
                 </div>
 
                 <div className="p-4 bg-slate-50 border border-dashed border-slate-300 rounded-2xl text-xs space-y-2">
@@ -743,8 +766,8 @@ export default function ViewOrdersPage() {
                 </div>
 
                 <div className="flex justify-end gap-2">
-                  <button onClick={() => setSelectedTagOrder(null)} className="px-4 py-2 bg-gray-100 rounded-xl text-xs font-bold text-gray-600">Close</button>
-                  <button onClick={() => window.print()} className="px-5 py-2 bg-[#1a2b3c] text-white rounded-xl text-xs font-bold flex items-center gap-2">
+                  <button onClick={() => setSelectedTagOrder(null)} className="px-4 py-2 bg-gray-100 rounded-xl text-xs font-bold text-gray-600 cursor-pointer">Close</button>
+                  <button onClick={() => window.print()} className="px-5 py-2 bg-[#1a2b3c] text-white rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer hover:bg-[#253d54]">
                     <Printer className="w-3.5 h-3.5" /> Print Tag
                   </button>
                 </div>
