@@ -29,9 +29,9 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
-  // Pagination state (15 records per A4 sheet format)
+  // Exactly 25 records per view / per page
   const [currentPage, setCurrentPage] = useState(1);
-  const recordsPerPage = 15;
+  const recordsPerPage = 25;
 
   // Header & menu state
   const [ownerInfo, setOwnerInfo] = useState({ name: 'Owner', avatar: '' });
@@ -50,12 +50,11 @@ export default function ReportsPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Fetch ALL records (Bypassing 1,000 Supabase API default limit via Chunk Range)
+  // Fetch complete database records in parallel chunks
   const fetchReportData = async () => {
     try {
       setLoading(true);
 
-      // 1. Fetch Owner Profile
       const { data: settingsData } = await supabase
         .from('app_settings')
         .select('owner_name, avatar_url')
@@ -69,7 +68,6 @@ export default function ReportsPage() {
         });
       }
 
-      // 2. Exact Count to know total chunks
       const { count: totalCount, error: countErr } = await supabase
         .from('job_cards')
         .select('*', { count: 'exact', head: true });
@@ -80,7 +78,6 @@ export default function ReportsPage() {
       const chunkSize = 1000;
       const totalChunks = Math.ceil(total / chunkSize);
 
-      // 3. Parallel Chunk Requests to fetch all 10k records quickly
       const chunkPromises = [];
       for (let i = 0; i < totalChunks; i++) {
         const from = i * chunkSize;
@@ -123,16 +120,14 @@ export default function ReportsPage() {
     }
   };
 
-  // Realtime Filter Trigger
   useEffect(() => {
     applyAllFilters(fromDate, toDate, searchQuery, selectedStatus);
-    setCurrentPage(1); // Reset to page 1 on filter/search change
+    setCurrentPage(1);
   }, [fromDate, toDate, searchQuery, selectedStatus, orders]);
 
   const applyAllFilters = (from, to, search, status) => {
     let result = [...orders];
 
-    // 1. Date Filter
     if (from && to) {
       result = result.filter(o => (o.order_date || '') >= from && (o.order_date || '') <= to);
     } else if (from) {
@@ -141,12 +136,10 @@ export default function ReportsPage() {
       result = result.filter(o => (o.order_date || '') <= to);
     }
 
-    // 2. Status Filter
     if (status !== 'All') {
       result = result.filter(o => o.status === status);
     }
 
-    // 3. Search Filter (Customer Name, Order ID, Model, Material)
     if (search.trim()) {
       const q = search.toLowerCase().trim();
       result = result.filter(o => {
@@ -184,18 +177,25 @@ export default function ReportsPage() {
     }, 1500);
   };
 
-  // Metrics for all matching records
+  // Metrics on filtered result
   const totalOrders = filteredOrders.length;
   const totalQty = filteredOrders.reduce((sum, o) => sum + (parseInt(o.qty) || 1), 0);
   const totalGearAmt = filteredOrders.reduce((sum, o) => sum + (parseFloat(o.gear_price) || 0), 0);
   const totalTcAmt = filteredOrders.reduce((sum, o) => sum + (parseFloat(o.tc_amt) || 0), 0);
   const grandTotal = totalGearAmt + totalTcAmt;
 
-  // Pagination Slice
+  // Web screen pagination: 25 items
   const totalPages = Math.ceil(totalOrders / recordsPerPage) || 1;
   const indexOfLastRecord = currentPage * recordsPerPage;
   const indexOfFirstRecord = indexOfLastRecord - recordsPerPage;
-  const currentRecords = filteredOrders.slice(indexOfFirstRecord, indexOfLastRecord);
+  const screenRecords = filteredOrders.slice(indexOfFirstRecord, indexOfLastRecord);
+
+  // Group ALL filtered orders into 25-record chunks for print pagination
+  const printChunks = [];
+  for (let i = 0; i < filteredOrders.length; i += recordsPerPage) {
+    printChunks.push(filteredOrders.slice(i, i + recordsPerPage));
+  }
+  const totalPrintPages = printChunks.length || 1;
 
   const statusOptions = ['All', 'Pending', 'In-Production', 'Completed', 'Delivered'];
 
@@ -211,12 +211,12 @@ export default function ReportsPage() {
   return (
     <div className="flex h-screen bg-[#f0f4f8] font-sans text-gray-800 antialiased overflow-hidden relative print:h-auto print:overflow-visible print:bg-white">
       
-      {/* Print Specific CSS */}
+      {/* Precision Print Styling for 25 Rows per page */}
       <style jsx global>{`
         @media print {
           @page {
             size: A4 portrait;
-            margin: 10mm;
+            margin: 8mm 10mm;
           }
           body {
             background: white !important;
@@ -224,13 +224,32 @@ export default function ReportsPage() {
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
-          .print-table th, .print-table td {
+          .print-page {
+            page-break-after: always;
+            break-after: page;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+          }
+          .print-page:last-child {
+            page-break-after: auto;
+            break-after: auto;
+          }
+          .print-table th {
+            border: 1px solid #94a3b8 !important;
+            padding: 4px 6px !important;
+            font-size: 9.5px !important;
+            background-color: #f1f5f9 !important;
+          }
+          .print-table td {
             border: 1px solid #cbd5e1 !important;
-            padding: 6px 8px !important;
+            padding: 2.8px 6px !important;
+            font-size: 9px !important;
+            line-height: 1.15 !important;
           }
         }
 
-        /* AI Loader Styles */
         .loader-wrapper {
           position: relative;
           display: flex;
@@ -365,7 +384,7 @@ export default function ReportsPage() {
       {/* Main Container */}
       <div className="flex-1 flex flex-col overflow-hidden w-full z-10 relative print:overflow-visible">
         
-        {/* Header */}
+        {/* Web Header */}
         <header className="print:hidden h-20 bg-white/30 backdrop-blur-xl border-b border-white/50 flex items-center justify-between px-4 md:px-8 relative z-50 shrink-0">
           <div className="flex items-center gap-3">
             <button className="lg:hidden p-2 text-gray-600 hover:bg-white/50 rounded-xl" onClick={() => setIsMobileMenuOpen(true)}>
@@ -388,34 +407,88 @@ export default function ReportsPage() {
           </div>
         </header>
 
-        {/* PRINT ONLY: Clean Letterhead Header */}
-        <div className="hidden print:block mb-4 border-b-2 border-gray-800 pb-3">
-          <div className="flex justify-between items-start">
-            <div>
-              <h1 className="text-2xl font-black text-gray-900 tracking-tight">KHAKARE ENGINEERING</h1>
-              <p className="text-xs text-gray-600 mt-0.5">Specialists in Gear Hobbing, Milling, Shaping & Precision Works</p>
-              <p className="text-[11px] text-gray-500">Jalna, Maharashtra</p>
+        {/* ========================================================================= */}
+        {/* PRINT ENGINE: Iterates over ALL filtered records in 25-record page chunks */}
+        {/* ========================================================================= */}
+        <div className="hidden print:block w-full">
+          {printChunks.map((chunk, pageIndex) => (
+            <div key={pageIndex} className="print-page">
+              {/* Header on Every Page */}
+              <div>
+                <div className="border-b-2 border-gray-800 pb-2 mb-2 flex justify-between items-start">
+                  <div>
+                    <h1 className="text-lg font-black text-gray-900 tracking-tight leading-none">KHAKARE ENGINEERING</h1>
+                    <p className="text-[10px] text-gray-600 mt-0.5">Specialists in Gear Hobbing, Milling, Shaping & Precision Works</p>
+                    <p className="text-[9px] text-gray-500">Jalna, Maharashtra</p>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] font-bold px-2 py-0.5 bg-gray-100 rounded border border-gray-300">PRODUCTION REPORT</span>
+                    <p className="text-[8.5px] text-gray-500 mt-0.5">Generated: {new Date().toLocaleDateString('en-GB')}</p>
+                    <p className="text-[8.5px] font-bold text-gray-800">Page {pageIndex + 1} of {totalPrintPages}</p>
+                    {(searchQuery || selectedStatus !== 'All') && (
+                      <p className="text-[8.5px] font-bold text-teal-700 mt-0.5">
+                        {searchQuery ? `"${searchQuery}" ` : ''}{selectedStatus !== 'All' ? `[${selectedStatus}]` : ''}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Exactly 25 rows Table */}
+                <table className="w-full text-left print-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Job ID</th>
+                      <th>Customer Name</th>
+                      <th>Model / Specs</th>
+                      <th className="text-center">Qty</th>
+                      <th className="text-right">Gear Price</th>
+                      <th className="text-right">TC Amt</th>
+                      <th className="text-center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {chunk.map(o => (
+                      <tr key={o.id}>
+                        <td>{o.order_date || '—'}</td>
+                        <td className="font-bold">#{o.id}</td>
+                        <td className="font-bold">{o.customers?.name || 'Customer Deleted'}</td>
+                        <td>{o.model || 'Standard'} (OD: {o.od || '—'}, NT: {o.nt || '—'})</td>
+                        <td className="text-center font-bold">{o.qty || 1}</td>
+                        <td className="text-right font-bold">₹{Number(o.gear_price || 0).toLocaleString('en-IN')}</td>
+                        <td className="text-right">₹{Number(o.tc_amt || 0).toLocaleString('en-IN')}</td>
+                        <td className="text-center font-bold">{o.status}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Footer on Every Page */}
+              <div className="flex justify-between items-end pt-2 mt-2 border-t border-gray-300 text-xs">
+                <div>
+                  <p className="font-bold text-gray-800">KHAKARE ENGINEERING</p>
+                  <p className="text-[9px] text-gray-500">A4 Production Statement - Page {pageIndex + 1} of {totalPrintPages}</p>
+                </div>
+                <div className="text-center">
+                  <div className="w-36 border-b border-gray-400 mb-1"></div>
+                  <p className="font-bold text-gray-700">Authorized Signature</p>
+                </div>
+              </div>
             </div>
-            <div className="text-right">
-              <span className="text-xs font-bold px-3 py-1 bg-gray-100 rounded border border-gray-300">PRODUCTION REPORT</span>
-              <p className="text-[10px] text-gray-500 mt-1">Generated: {new Date().toLocaleDateString('en-GB')}</p>
-              <p className="text-[10px] text-gray-500">Page: {currentPage} of {totalPages}</p>
-              {(searchQuery || selectedStatus !== 'All') && (
-                <p className="text-[10px] font-bold text-teal-700 mt-0.5">
-                  Filtered: {searchQuery ? `"${searchQuery}" ` : ''}{selectedStatus !== 'All' ? `[Status: ${selectedStatus}]` : ''}
-                </p>
-              )}
-            </div>
-          </div>
+          ))}
         </div>
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 pt-6 print:p-0 print:overflow-visible">
+        {/* ========================================================================= */}
+        {/* WEB INTERFACE VIEW (25 Records per view + Pagination Controls)            */}
+        {/* ========================================================================= */}
+        <main className="print:hidden flex-1 overflow-y-auto p-4 md:p-8 space-y-6 pt-6">
           
           {/* Action Bar */}
-          <div className="print:hidden flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h1 className="text-2xl md:text-3xl font-black text-[#1a2b3c]">Date-wise Reports</h1>
-              <p className="text-xs md:text-sm text-gray-500">Complete database production statements with page controls.</p>
+              <p className="text-xs md:text-sm text-gray-500">Complete database production statements with 25 records per view.</p>
             </div>
 
             <button
@@ -429,7 +502,7 @@ export default function ReportsPage() {
           </div>
 
           {/* Date Filter Box */}
-          <div className="print:hidden bg-white/50 backdrop-blur-2xl p-5 rounded-3xl border border-white/70 shadow-xs flex flex-col md:flex-row items-end gap-4">
+          <div className="bg-white/50 backdrop-blur-2xl p-5 rounded-3xl border border-white/70 shadow-xs flex flex-col md:flex-row items-end gap-4">
             <div className="w-full md:w-1/3">
               <label className="text-[11px] md:text-xs font-bold text-gray-500 uppercase block mb-1">From Date</label>
               <input
@@ -459,8 +532,8 @@ export default function ReportsPage() {
             </div>
           </div>
 
-          {/* Summary Stat Cards (Full Database Exact Sums) */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 md:gap-4 print:hidden">
+          {/* Summary Stat Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 md:gap-4">
             <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs min-w-0">
               <span className="text-xl sm:text-2xl md:text-3xl font-black text-[#1a2b3c] block truncate">
                 {loading ? '...' : totalOrders.toLocaleString('en-IN')}
@@ -488,7 +561,7 @@ export default function ReportsPage() {
           </div>
 
           {/* Search Bar & Status Tabs */}
-          <div className="print:hidden bg-white/50 backdrop-blur-2xl p-4 rounded-[2rem] border border-white/70 shadow-xs flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="bg-white/50 backdrop-blur-2xl p-4 rounded-[2rem] border border-white/70 shadow-xs flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="relative w-full md:w-80">
               <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
@@ -521,41 +594,41 @@ export default function ReportsPage() {
             </div>
           </div>
 
-          {/* Table Container - Clean Engineering Grid (A4 Sheet Ready: 15 records) */}
-          <div className="bg-white/50 backdrop-blur-2xl rounded-[2rem] border border-white/70 shadow-xs overflow-hidden print:bg-white print:rounded-none print:border-none print:shadow-none">
+          {/* Table Container - Showing 25 records on screen */}
+          <div className="bg-white/50 backdrop-blur-2xl rounded-[2rem] border border-white/70 shadow-xs overflow-hidden">
             <div className="overflow-x-auto w-full">
-              <table className="w-full text-left text-xs md:text-sm min-w-[700px] print:min-w-full print:text-[10px] print-table">
-                <thead className="text-[11px] md:text-xs uppercase font-bold text-gray-500 bg-white/40 border-b border-gray-200 print:bg-gray-100 print:text-gray-900">
+              <table className="w-full text-left text-xs md:text-sm min-w-[700px]">
+                <thead className="text-[11px] md:text-xs uppercase font-bold text-gray-500 bg-white/40 border-b border-gray-200">
                   <tr>
-                    <th className="py-3 px-3">Date</th>
-                    <th className="py-3 px-3">Job ID</th>
-                    <th className="py-3 px-3">Customer Name</th>
-                    <th className="py-3 px-3">Model / Specs</th>
-                    <th className="py-3 px-3 text-center">Qty</th>
-                    <th className="py-3 px-3 text-right">Gear Price</th>
-                    <th className="py-3 px-3 text-right">TC Amt</th>
-                    <th className="py-3 px-3 text-center">Status</th>
+                    <th className="py-3 px-4">Date</th>
+                    <th className="py-3 px-4">Job ID</th>
+                    <th className="py-3 px-4">Customer Name</th>
+                    <th className="py-3 px-4">Model / Specs</th>
+                    <th className="py-3 px-4 text-center">Qty</th>
+                    <th className="py-3 px-4 text-right">Gear Price</th>
+                    <th className="py-3 px-4 text-right">TC Amt</th>
+                    <th className="py-3 px-4 text-center">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/60 font-medium print:divide-gray-300">
+                <tbody className="divide-y divide-white/60 font-medium">
                   {loading ? (
                     <tr><td colSpan="8" className="text-center py-10 text-gray-400">Loading complete database records...</td></tr>
-                  ) : currentRecords.length === 0 ? (
+                  ) : screenRecords.length === 0 ? (
                     <tr><td colSpan="8" className="text-center py-10 text-gray-400">No records found matching current criteria.</td></tr>
                   ) : (
-                    currentRecords.map(o => (
+                    screenRecords.map(o => (
                       <tr key={o.id} className="hover:bg-white/40 transition">
-                        <td className="py-2.5 px-3 text-gray-600">{o.order_date || '—'}</td>
-                        <td className="py-2.5 px-3 font-bold text-[#3db2a8] print:text-gray-900">#{o.id}</td>
-                        <td className="py-2.5 px-3 font-bold text-[#1a2b3c] print:text-gray-900">{o.customers?.name || 'Customer Deleted'}</td>
-                        <td className="py-2.5 px-3 text-gray-700">
+                        <td className="py-2.5 px-4 text-gray-600">{o.order_date || '—'}</td>
+                        <td className="py-2.5 px-4 font-bold text-[#3db2a8]">#{o.id}</td>
+                        <td className="py-2.5 px-4 font-bold text-[#1a2b3c]">{o.customers?.name || 'Customer Deleted'}</td>
+                        <td className="py-2.5 px-4 text-gray-700">
                           {o.model || 'Standard'} (OD: {o.od || '—'}, NT: {o.nt || '—'})
                         </td>
-                        <td className="py-2.5 px-3 text-center font-bold text-teal-700 print:text-gray-900">{o.qty || 1}</td>
-                        <td className="py-2.5 px-3 text-right font-bold text-gray-900">₹{Number(o.gear_price || 0).toLocaleString('en-IN')}</td>
-                        <td className="py-2.5 px-3 text-right text-gray-600">₹{Number(o.tc_amt || 0).toLocaleString('en-IN')}</td>
-                        <td className="py-2.5 px-3 text-center">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold print:border print:px-1.5 print:py-0 ${getStatusBadge(o.status)}`}>
+                        <td className="py-2.5 px-4 text-center font-bold text-teal-700">{o.qty || 1}</td>
+                        <td className="py-2.5 px-4 text-right font-bold text-gray-900">₹{Number(o.gear_price || 0).toLocaleString('en-IN')}</td>
+                        <td className="py-2.5 px-4 text-right text-gray-600">₹{Number(o.tc_amt || 0).toLocaleString('en-IN')}</td>
+                        <td className="py-2.5 px-4 text-center">
+                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${getStatusBadge(o.status)}`}>
                             {o.status}
                           </span>
                         </td>
@@ -566,8 +639,8 @@ export default function ReportsPage() {
               </table>
             </div>
 
-            {/* Pagination Controls Bar (Hidden on Print) */}
-            <div className="print:hidden p-4 border-t border-gray-100/80 flex flex-col sm:flex-row items-center justify-between gap-3 bg-white/30">
+            {/* Pagination Controls Bar: Exact 1 to 25 Display */}
+            <div className="p-4 border-t border-gray-100/80 flex flex-col sm:flex-row items-center justify-between gap-3 bg-white/30">
               <span className="text-xs md:text-sm font-semibold text-gray-500">
                 Showing <strong className="text-gray-800">{totalOrders > 0 ? indexOfFirstRecord + 1 : 0}</strong> to <strong className="text-gray-800">{Math.min(indexOfLastRecord, totalOrders)}</strong> of <strong className="text-[#3db2a8]">{totalOrders.toLocaleString('en-IN')}</strong> records
               </span>
@@ -576,7 +649,7 @@ export default function ReportsPage() {
                 <button
                   onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                   disabled={currentPage === 1 || loading}
-                  className="px-3 py-1.5 rounded-xl border border-gray-200 bg-white/80 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed font-bold text-xs flex items-center gap-1 shadow-xs transition"
+                  className="px-3 py-1.5 rounded-xl border border-gray-200 bg-white/80 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed font-bold text-xs flex items-center gap-1 shadow-xs transition cursor-pointer"
                 >
                   <ChevronLeft className="w-4 h-4" />
                   <span>Previous</span>
@@ -590,7 +663,7 @@ export default function ReportsPage() {
                 <button
                   onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                   disabled={currentPage === totalPages || loading}
-                  className="px-3 py-1.5 rounded-xl border border-gray-200 bg-white/80 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed font-bold text-xs flex items-center gap-1 shadow-xs transition"
+                  className="px-3 py-1.5 rounded-xl border border-gray-200 bg-white/80 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed font-bold text-xs flex items-center gap-1 shadow-xs transition cursor-pointer"
                 >
                   <span>Next</span>
                   <ChevronRight className="w-4 h-4" />
@@ -598,18 +671,6 @@ export default function ReportsPage() {
               </div>
             </div>
 
-          </div>
-
-          {/* PRINT ONLY: Footer */}
-          <div className="hidden print:flex justify-between items-end pt-8 mt-6 border-t border-gray-300 text-xs">
-            <div>
-              <p className="font-bold text-gray-800">KHAKARE ENGINEERING</p>
-              <p className="text-[10px] text-gray-500">A4 Production Statement - Page {currentPage} of {totalPages}</p>
-            </div>
-            <div className="text-center">
-              <div className="w-44 border-b border-gray-400 mb-1"></div>
-              <p className="font-bold text-gray-700">Authorized Signature</p>
-            </div>
           </div>
 
         </main>
