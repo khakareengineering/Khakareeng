@@ -40,7 +40,6 @@ export default function DashboardPage() {
   });
 
   const [recentJobs, setRecentJobs] = useState([]);
-  const [allJobs, setAllJobs] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Profile and Mobile menu state
@@ -108,8 +107,68 @@ export default function DashboardPage() {
         });
       }
 
-      // 2. Fetch Job Cards with customer details
-      const { data: jobsData, error: jobErr } = await supabase
+      const { currentStr, prevStr } = getDateFilterThresholds(selectedRange);
+
+      // 2. Exact Counts for 5 Stat Cards (Bypasses Supabase 1,000 row default limit)
+      const buildCountQuery = () => {
+        let q = supabase.from('job_cards').select('*', { count: 'exact', head: true });
+        if (selectedRange !== 'All Time') {
+          q = q.gte('order_date', currentStr);
+        }
+        return q;
+      };
+
+      const [
+        { count: totalCount },
+        { count: pendingCount },
+        { count: inProdCount },
+        { count: completedCount },
+        { count: deliveredCount },
+        { count: prevTotalCount }
+      ] = await Promise.all([
+        buildCountQuery(),
+        buildCountQuery().eq('status', 'Pending'),
+        buildCountQuery().eq('status', 'In-Production'),
+        buildCountQuery().eq('status', 'Completed'),
+        buildCountQuery().eq('status', 'Delivered'),
+        selectedRange !== 'All Time'
+          ? supabase
+              .from('job_cards')
+              .select('*', { count: 'exact', head: true })
+              .gte('order_date', prevStr)
+              .lt('order_date', currentStr)
+          : Promise.resolve({ count: 0 })
+      ]);
+
+      const totalJobs = totalCount || 0;
+      const finishedJobs = (completedCount || 0) + (deliveredCount || 0);
+
+      // 3. Overall Job Growth Calculation
+      const prevJobs = prevTotalCount || 0;
+      let jobGrowthPercent = 0;
+      let jobGrowthIsUp = true;
+
+      if (prevJobs > 0) {
+        jobGrowthPercent = Math.round(((totalJobs - prevJobs) / prevJobs) * 100);
+        jobGrowthIsUp = jobGrowthPercent >= 0;
+      } else {
+        jobGrowthPercent = totalJobs > 0 ? 100 : 0;
+        jobGrowthIsUp = true;
+      }
+
+      // 4. Shop Efficiency Calculation
+      const efficiencyPct = totalJobs > 0 ? Math.round((finishedJobs / totalJobs) * 100) : 0;
+      const efficiencyIsUp = totalJobs > 0 && finishedJobs > 0 && efficiencyPct >= 50;
+
+      // 5. Total Output (Pcs) & Recent 5 Jobs
+      let qtyQuery = supabase.from('job_cards').select('qty');
+      if (selectedRange !== 'All Time') {
+        qtyQuery = qtyQuery.gte('order_date', currentStr);
+      }
+      const { data: qtyData } = await qtyQuery;
+      const totalPcs = (qtyData || []).reduce((sum, j) => sum + (parseInt(j.qty) || 1), 0);
+
+      let recentQuery = supabase
         .from('job_cards')
         .select(`
           id,
@@ -123,61 +182,32 @@ export default function DashboardPage() {
           customer_id,
           customers ( id, name )
         `)
-        .order('id', { ascending: false });
+        .order('id', { ascending: false })
+        .limit(5);
 
-      if (jobErr) throw jobErr;
-
-      const jobs = jobsData || [];
-      setAllJobs(jobs);
-
-      const { currentStr, prevStr } = getDateFilterThresholds(selectedRange);
-
-      const periodJobs = selectedRange === 'All Time'
-        ? jobs
-        : jobs.filter(j => (j.order_date || '') >= currentStr);
-
-      const prevPeriodJobs = selectedRange === 'All Time'
-        ? []
-        : jobs.filter(j => (j.order_date || '') >= prevStr && (j.order_date || '') < currentStr);
-
-      setRecentJobs(periodJobs.slice(0, 5));
-
-      // 3. Calculate Master Metrics
-      const currentJobsCount = periodJobs.length;
-      const prevJobsCount = prevPeriodJobs.length;
-      let jobGrowthPercent = 0;
-      let jobGrowthIsUp = true;
-
-      if (prevJobsCount > 0) {
-        jobGrowthPercent = Math.round(((currentJobsCount - prevJobsCount) / prevJobsCount) * 100);
-        jobGrowthIsUp = jobGrowthPercent >= 0;
-      } else {
-        jobGrowthPercent = currentJobsCount > 0 ? 100 : 0;
-        jobGrowthIsUp = true;
+      if (selectedRange !== 'All Time') {
+        recentQuery = recentQuery.gte('order_date', currentStr);
       }
+      const { data: recentData, error: recentErr } = await recentQuery;
+      if (recentErr) throw recentErr;
 
-      // Total Output (Pcs)
-      const totalPcs = periodJobs.reduce((sum, j) => sum + (parseInt(j.qty) || 1), 0);
+      setRecentJobs(recentData || []);
 
-      // Shop Efficiency (Completed + Delivered vs Total)
-      const finishedCount = periodJobs.filter(j => j.status === 'Completed' || j.status === 'Delivered').length;
-      const efficiencyPct = periodJobs.length > 0 ? Math.round((finishedCount / periodJobs.length) * 100) : 0;
-      const efficiencyIsUp = periodJobs.length > 0 && finishedCount > 0 && efficiencyPct >= 50;
+      // 6. Set Final State
+      setStats({
+        totalJobs: totalJobs,
+        pending: pendingCount || 0,
+        inProduction: inProdCount || 0,
+        completed: completedCount || 0,
+        delivered: deliveredCount || 0
+      });
 
       setPulseMetrics({
-        jobGrowth: { count: currentJobsCount, percent: jobGrowthPercent, isUp: jobGrowthIsUp },
+        jobGrowth: { count: totalJobs, percent: jobGrowthPercent, isUp: jobGrowthIsUp },
         totalOutputPcs: totalPcs,
         efficiency: { percent: efficiencyPct, isUp: efficiencyIsUp }
       });
 
-      // 4. Main 5 Stat Cards: TOTAL JOBS, PENDING, IN-PRODUCTION, COMPLETED, DELIVERED
-      setStats({
-        totalJobs: periodJobs.length,
-        pending: periodJobs.filter(j => j.status === 'Pending').length,
-        inProduction: periodJobs.filter(j => j.status === 'In-Production').length,
-        completed: periodJobs.filter(j => j.status === 'Completed').length,
-        delivered: periodJobs.filter(j => j.status === 'Delivered').length
-      });
     } catch (err) {
       console.error('Error fetching dashboard data:', err.message);
     } finally {
@@ -330,27 +360,27 @@ export default function DashboardPage() {
           {/* 5 Live Stat Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 md:gap-4">
             <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs flex flex-col justify-between min-w-0">
-              <span className="text-2xl md:text-3xl font-black text-[#3db2a8] truncate">{loading ? '...' : stats.totalJobs}</span>
+              <span className="text-2xl md:text-3xl font-black text-[#3db2a8] truncate">{loading ? '...' : stats.totalJobs.toLocaleString('en-IN')}</span>
               <span className="text-xs md:text-sm font-bold text-gray-500 uppercase tracking-wider mt-1 block truncate">TOTAL JOBS</span>
             </div>
 
             <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs flex flex-col justify-between min-w-0">
-              <span className="text-2xl md:text-3xl font-black text-amber-500 truncate">{loading ? '...' : stats.pending}</span>
+              <span className="text-2xl md:text-3xl font-black text-amber-500 truncate">{loading ? '...' : stats.pending.toLocaleString('en-IN')}</span>
               <span className="text-xs md:text-sm font-bold text-gray-500 uppercase tracking-wider mt-1 block truncate">PENDING</span>
             </div>
 
             <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs flex flex-col justify-between min-w-0">
-              <span className="text-2xl md:text-3xl font-black text-blue-500 truncate">{loading ? '...' : stats.inProduction}</span>
+              <span className="text-2xl md:text-3xl font-black text-blue-500 truncate">{loading ? '...' : stats.inProduction.toLocaleString('en-IN')}</span>
               <span className="text-xs md:text-sm font-bold text-gray-500 uppercase tracking-wider mt-1 block truncate">IN-PRODUCTION</span>
             </div>
 
             <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs flex flex-col justify-between min-w-0">
-              <span className="text-2xl md:text-3xl font-black text-emerald-500 truncate">{loading ? '...' : stats.completed}</span>
+              <span className="text-2xl md:text-3xl font-black text-emerald-500 truncate">{loading ? '...' : stats.completed.toLocaleString('en-IN')}</span>
               <span className="text-xs md:text-sm font-bold text-gray-500 uppercase tracking-wider mt-1 block truncate">COMPLETED</span>
             </div>
 
             <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs flex flex-col justify-between min-w-0 col-span-2 sm:col-span-1">
-              <span className="text-2xl md:text-3xl font-black text-purple-600 truncate">{loading ? '...' : stats.delivered}</span>
+              <span className="text-2xl md:text-3xl font-black text-purple-600 truncate">{loading ? '...' : stats.delivered.toLocaleString('en-IN')}</span>
               <span className="text-xs md:text-sm font-bold text-gray-500 uppercase tracking-wider mt-1 block truncate">DELIVERED</span>
             </div>
           </div>
@@ -421,7 +451,7 @@ export default function DashboardPage() {
                   <span className={`text-2xl sm:text-3xl md:text-4xl font-black tracking-tight ${
                     pulseMetrics.jobGrowth.isUp ? 'text-emerald-500' : 'text-rose-500'
                   }`}>
-                    {pulseMetrics.jobGrowth.count}
+                    {pulseMetrics.jobGrowth.count.toLocaleString('en-IN')}
                   </span>
                   <div className={`flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-black shadow-xs ${
                     pulseMetrics.jobGrowth.isUp 
@@ -444,7 +474,7 @@ export default function DashboardPage() {
               {/* 2. TOTAL OUTPUT */}
               <div className="px-2 sm:px-4 md:px-6">
                 <span className="text-2xl sm:text-3xl md:text-4xl font-black text-[#3db2a8] tracking-tight block">
-                  {pulseMetrics.totalOutputPcs} <span className="text-base md:text-lg font-bold text-[#3db2a8]">Pcs</span>
+                  {pulseMetrics.totalOutputPcs.toLocaleString('en-IN')} <span className="text-base md:text-lg font-bold text-[#3db2a8]">Pcs</span>
                 </span>
                 <span className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest mt-1 block">
                   TOTAL OUTPUT
