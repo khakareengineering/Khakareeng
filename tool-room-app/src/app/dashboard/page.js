@@ -300,7 +300,7 @@ export default function DashboardPage() {
       <div className="flex-1 flex flex-col overflow-hidden w-full z-10 relative">
         <header className="h-20 bg-white/30 backdrop-blur-xl border-b border-white/50 flex items-center justify-between px-4 md:px-8 relative z-50 shrink-0">
           <div className="flex items-center gap-3">
-            <button className="lg:hidden p-2 text-gray-600 hover:bg-white/50 rounded-xl" onClick={() => setIsMobileMenuOpen(true)}>
+            <button className="md:hidden p-2 text-gray-600 hover:bg-white/50 rounded-xl" onClick={() => setIsMobileMenuOpen(true)}>
               <Menu className="w-6 h-6" />
             </button>
             <span className="text-sm md:text-base font-extrabold text-[#1a2b3c] tracking-tight">Khakare Engineering</span>
@@ -441,10 +441,11 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Master Pulse */}
-          <div className="bg-white/50 backdrop-blur-2xl rounded-[2.25rem] border border-white/70 shadow-xs p-6 md:p-8 flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="flex items-center gap-4 w-full md:w-1/4 justify-center md:justify-start">
-              <div className="w-12 h-12 rounded-2xl bg-[#3db2a8]/15 border border-[#3db2a8]/25 flex items-center justify-center text-[#3db2a8] shadow-xs">
+          {/* Master Pulse - Full Responsive for Tablet Portrait */}
+          <div className="bg-white/50 backdrop-blur-2xl rounded-[2.25rem] border border-white/70 shadow-xs p-5 sm:p-6 lg:p-8 flex flex-col lg:flex-row items-center justify-between gap-6">
+            
+            <div className="flex items-center gap-4 w-full lg:w-1/4 justify-center lg:justify-start">
+              <div className="w-12 h-12 rounded-2xl bg-[#3db2a8]/15 border border-[#3db2a8]/25 flex items-center justify-center text-[#3db2a8] shadow-xs shrink-0">
                 <Activity className="w-6 h-6 text-[#3db2a8]" />
               </div>
               <div>
@@ -453,61 +454,67 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 divide-x divide-gray-200/60 w-full md:w-3/4 text-center items-center">
-              <div className="px-2 sm:px-4 md:px-6">
-                <div className="flex items-center justify-center gap-2">
-                  <span className={`text-2xl sm:text-3xl md:text-4xl font-black tracking-tight ${
+            <div className="grid grid-cols-3 divide-x divide-gray-200/60 w-full lg:w-3/4 text-center items-center">
+              {/* Col 1 */}
+              <div className="px-1 sm:px-4">
+                <div className="flex items-center justify-center gap-1 sm:gap-2 whitespace-nowrap">
+                  <span className={`text-xl sm:text-3xl lg:text-4xl font-black tracking-tight ${
                     pulseMetrics.jobGrowth.isUp ? 'text-emerald-500' : 'text-rose-500'
                   }`}>
                     {pulseMetrics.jobGrowth.count.toLocaleString('en-IN')}
                   </span>
-                  <div className={`flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-black shadow-xs ${
+                  <div className={`flex items-center gap-0.5 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] lg:text-xs font-black shadow-xs ${
                     pulseMetrics.jobGrowth.isUp 
                       ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' 
                       : 'bg-rose-50 text-rose-600 border border-rose-200'
                   }`}>
                     {pulseMetrics.jobGrowth.isUp ? (
-                      <ArrowUp className="w-3 h-3 text-emerald-600 stroke-[3]" />
+                      <ArrowUp className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-emerald-600 stroke-[3]" />
                     ) : (
-                      <ArrowDown className="w-3 h-3 text-rose-600 stroke-[3]" />
+                      <ArrowDown className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-rose-600 stroke-[3]" />
                     )}
                     <span>{Math.abs(pulseMetrics.jobGrowth.percent)}%</span>
                   </div>
                 </div>
-                <span className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest mt-1 block">
+                <span className="text-[9px] sm:text-[10px] lg:text-xs font-bold text-gray-400 uppercase tracking-widest mt-1.5 block">
                   OVERALL JOB GROWTH
                 </span>
               </div>
 
-              <div className="px-2 sm:px-4 md:px-6">
-                <span className="text-2xl sm:text-3xl md:text-4xl font-black text-[#3db2a8] tracking-tight block">
-                  {pulseMetrics.totalOutputPcs.toLocaleString('en-IN')} <span className="text-base md:text-lg font-bold text-[#3db2a8]">Pcs</span>
-                </span>
-                <span className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest mt-1 block">
+              {/* Col 2 (Fixed Pcs wrap issue) */}
+              <div className="px-1 sm:px-4">
+                <div className="flex items-baseline justify-center gap-1 whitespace-nowrap">
+                  <span className="text-xl sm:text-3xl lg:text-4xl font-black text-[#3db2a8] tracking-tight">
+                    {pulseMetrics.totalOutputPcs.toLocaleString('en-IN')}
+                  </span>
+                  <span className="text-xs sm:text-sm lg:text-lg font-bold text-[#3db2a8]">Pcs</span>
+                </div>
+                <span className="text-[9px] sm:text-[10px] lg:text-xs font-bold text-gray-400 uppercase tracking-widest mt-1.5 block">
                   TOTAL OUTPUT
                 </span>
               </div>
 
-              <div className="px-2 sm:px-4 md:px-6">
-                <div className="flex items-center justify-center gap-2">
-                  <span className={`text-2xl sm:text-3xl md:text-4xl font-black tracking-tight ${
+              {/* Col 3 */}
+              <div className="px-1 sm:px-4">
+                <div className="flex items-center justify-center gap-1 sm:gap-2 whitespace-nowrap">
+                  <span className={`text-xl sm:text-3xl lg:text-4xl font-black tracking-tight ${
                     pulseMetrics.efficiency.isUp ? 'text-emerald-500' : 'text-rose-500'
                   }`}>
                     {pulseMetrics.efficiency.percent}%
                   </span>
-                  <div className={`flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-black shadow-xs ${
+                  <div className={`flex items-center gap-0.5 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] lg:text-xs font-black shadow-xs ${
                     pulseMetrics.efficiency.isUp 
                       ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' 
                       : 'bg-rose-50 text-rose-600 border border-rose-200'
                   }`}>
                     {pulseMetrics.efficiency.isUp ? (
-                      <ArrowUp className="w-3 h-3 text-emerald-600 stroke-[3]" />
+                      <ArrowUp className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-emerald-600 stroke-[3]" />
                     ) : (
-                      <ArrowDown className="w-3 h-3 text-rose-600 stroke-[3]" />
+                      <ArrowDown className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-rose-600 stroke-[3]" />
                     )}
                   </div>
                 </div>
-                <span className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest mt-1 block">
+                <span className="text-[9px] sm:text-[10px] lg:text-xs font-bold text-gray-400 uppercase tracking-widest mt-1.5 block">
                   SHOP EFFICIENCY
                 </span>
               </div>

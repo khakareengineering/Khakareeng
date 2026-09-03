@@ -152,7 +152,6 @@ export default function ReportsPage() {
       });
     }
 
-    // Latest to Oldest Sort on Filtered Array
     return [...result].sort((a, b) => {
       const dateA = new Date(a.order_date || '1970-01-01').getTime();
       const dateB = new Date(b.order_date || '1970-01-01').getTime();
@@ -173,7 +172,6 @@ export default function ReportsPage() {
     setCurrentPage(1);
   };
 
-  // Export PDF with Dynamic File Name: Report_DD-MM-YYYY
   const handleExportPdf = () => {
     setIsGeneratingPdf(true);
     const originalTitle = document.title;
@@ -184,7 +182,6 @@ export default function ReportsPage() {
     const year = today.getFullYear();
     const dynamicFileName = `Report_${day}-${month}-${year}`;
 
-    // Sets default PDF download file name
     document.title = dynamicFileName;
 
     setTimeout(() => {
@@ -197,20 +194,21 @@ export default function ReportsPage() {
   };
 
   const totalOrders = filteredOrders.length;
-  const { totalQty, totalGearAmt, totalTcAmt } = useMemo(() => {
-    let qty = 0;
+  
+  // High precision calculations: TC AMOUNT, GEAR AMOUNT, and GRAND TOTAL
+  const { totalGearAmt, totalTcAmt } = useMemo(() => {
     let gear = 0;
     let tc = 0;
     for (let i = 0; i < filteredOrders.length; i++) {
       const o = filteredOrders[i];
-      qty += (parseInt(o.qty) || 1);
       gear += (parseFloat(o.gear_price) || 0);
       tc += (parseFloat(o.tc_amt) || 0);
     }
-    return { totalQty: qty, totalGearAmt: gear, totalTcAmt: tc };
+    return { totalGearAmt: gear, totalTcAmt: tc };
   }, [filteredOrders]);
 
-  const grandTotal = totalGearAmt + totalTcAmt;
+  // GRAND TOTAL = TC AMOUNT + GEAR AMOUNT
+  const grandTotal = totalTcAmt + totalGearAmt;
 
   // Screen View Slice (25 per page)
   const totalPages = Math.ceil(totalOrders / screenRecordsPerPage) || 1;
@@ -242,7 +240,7 @@ export default function ReportsPage() {
   return (
     <div className="flex h-screen bg-[#f0f4f8] font-sans text-gray-800 antialiased overflow-hidden relative print:h-auto print:overflow-visible print:bg-white print:block">
       
-      {/* Precision Print Styling */}
+      {/* Print Specific CSS */}
       <style jsx global>{`
         @media print {
           @page {
@@ -352,7 +350,7 @@ export default function ReportsPage() {
         }
       `}</style>
 
-      {/* 1. PRINT SECTION */}
+      {/* 1. PRINT VIEW */}
       <div className="hidden print:block w-full">
         {printChunks.map((chunk, pageIndex) => (
           <div key={pageIndex} className="print-sheet">
@@ -385,7 +383,7 @@ export default function ReportsPage() {
                     <th className="w-[20%]">Customer Name</th>
                     <th className="w-[26%]">Model / Specs</th>
                     <th className="w-[6%] text-center">Qty</th>
-                    <th className="w-[11%] text-right">Gear Price</th>
+                    <th className="w-[11%] text-right">Gear Amt</th>
                     <th className="w-[9%] text-right">TC Amt</th>
                     <th className="w-[9%] text-center">Status</th>
                   </tr>
@@ -553,26 +551,33 @@ export default function ReportsPage() {
               </div>
             </div>
 
-            {/* Summary Stat Cards */}
+            {/* 4 Cards: TOTAL ORDERS -> TC AMOUNT -> GEAR AMOUNT -> GRAND TOTAL */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 md:gap-4">
+              {/* 1. TOTAL ORDERS */}
               <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs min-w-0">
                 <span className="text-xl sm:text-2xl md:text-3xl font-black text-[#1a2b3c] block truncate">
                   {loading ? '...' : totalOrders.toLocaleString('en-IN')}
                 </span>
                 <p className="text-[11px] md:text-xs font-bold text-gray-400 uppercase mt-1">TOTAL ORDERS</p>
               </div>
+
+              {/* 2. TC AMOUNT */}
               <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs min-w-0">
                 <span className="text-xl sm:text-2xl md:text-3xl font-black text-blue-600 block truncate">
-                  {loading ? '...' : `${totalQty.toLocaleString('en-IN')} Pcs`}
+                  {loading ? '...' : `₹${totalTcAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`}
                 </span>
-                <p className="text-[11px] md:text-xs font-bold text-gray-400 uppercase mt-1">TOTAL OUTPUT</p>
+                <p className="text-[11px] md:text-xs font-bold text-gray-400 uppercase mt-1">TC AMOUNT</p>
               </div>
+
+              {/* 3. GEAR AMOUNT */}
               <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs min-w-0">
                 <span className="text-xl sm:text-2xl md:text-3xl font-black text-[#3db2a8] block truncate">
                   {loading ? '...' : `₹${totalGearAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`}
                 </span>
                 <p className="text-[11px] md:text-xs font-bold text-gray-400 uppercase mt-1">GEAR AMOUNT</p>
               </div>
+
+              {/* 4. GRAND TOTAL (TC AMOUNT + GEAR AMOUNT) */}
               <div className="bg-white/50 backdrop-blur-2xl p-4 md:p-5 rounded-3xl border border-white/70 shadow-xs min-w-0">
                 <span className="text-xl sm:text-2xl md:text-3xl font-black text-emerald-600 block truncate">
                   {loading ? '...' : `₹${grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`}
@@ -626,7 +631,7 @@ export default function ReportsPage() {
                       <th className="py-3 px-4">Customer Name</th>
                       <th className="py-3 px-4">Model / Specs</th>
                       <th className="py-3 px-4 text-center">Qty</th>
-                      <th className="py-3 px-4 text-right">Gear Price</th>
+                      <th className="py-3 px-4 text-right">Gear Amt</th>
                       <th className="py-3 px-4 text-right">TC Amt</th>
                       <th className="py-3 px-4 text-center">Status</th>
                     </tr>
@@ -682,6 +687,7 @@ export default function ReportsPage() {
                   </div>
 
                   <button
+                    print
                     onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                     disabled={currentPage === totalPages || loading}
                     className="px-3 py-1.5 rounded-xl border border-gray-200 bg-white/80 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed font-bold text-xs flex items-center gap-1 shadow-xs transition cursor-pointer"
