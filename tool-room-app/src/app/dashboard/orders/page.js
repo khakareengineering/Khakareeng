@@ -222,7 +222,7 @@ export default function ViewOrdersPage() {
     }
   };
 
-  // CORRECTED PRINT HANDLER WITH PROPER FILENAME
+  // PRINT HANDLER
   const handlePrintProductDetail = (order) => {
     setIsPrintingOrder(true);
     const originalTitle = document.title;
@@ -257,18 +257,20 @@ export default function ViewOrdersPage() {
   return (
     <div className="flex h-screen bg-[#f0f4f8] font-sans text-gray-800 antialiased overflow-hidden relative print:h-auto print:overflow-visible print:bg-white print:block">
       
-      {/* Print Specific CSS */}
+      {/* 🔴 SECURE PRINT CSS: URL/Link Removal 🔴 */}
       <style jsx global>{`
         @media print {
           @page {
             size: A4 portrait;
-            margin: 10mm;
+            margin: 0mm; /* 0mm removes browser URL, Date, and Page numbers completely */
           }
           html, body {
             height: auto !important;
             overflow: visible !important;
             background: white !important;
             color: black !important;
+            margin: 0 !important;
+            padding: 10mm !important; /* Move margin to padding to keep content away from edges */
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }

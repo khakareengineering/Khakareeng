@@ -240,18 +240,20 @@ export default function ReportsPage() {
   return (
     <div className="flex h-screen bg-[#f0f4f8] font-sans text-gray-800 antialiased overflow-hidden relative print:h-auto print:overflow-visible print:bg-white print:block">
       
-      {/* Print Specific CSS */}
+      {/* 🔴 SECURE PRINT CSS 🔴 */}
       <style jsx global>{`
         @media print {
           @page {
             size: A4 portrait;
-            margin: 6mm 8mm 8mm 8mm;
+            margin: 0mm; /* Removed browser URL, Date, and Page numbers completely */
           }
           html, body {
             height: auto !important;
             overflow: visible !important;
             background: white !important;
             color: black !important;
+            margin: 0 !important;
+            padding: 10mm !important; /* Added padding to keep content away from edges */
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
@@ -262,7 +264,7 @@ export default function ReportsPage() {
             page-break-after: always !important;
             break-after: page !important;
             box-sizing: border-box;
-            min-height: 280mm;
+            min-height: 275mm;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
